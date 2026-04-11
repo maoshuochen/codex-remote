@@ -1,0 +1,14 @@
+{
+  "name": "codex-remote",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:bridge": "npm run dev --workspace @codex-remote/mac-bridge",
+    "test": "npm run test --workspaces --if-present"
+  }
+}
