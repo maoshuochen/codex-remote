@@ -11,7 +11,9 @@ import com.codexremote.app.network.BridgeRepository
 import java.util.Base64
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.SerializationException
 
 private val pairingJson = Json { ignoreUnknownKeys = true }
 
@@ -49,8 +51,7 @@ class PairingViewModel(
                 pairingError = null
                 isPaired = true
             }.onFailure { error ->
-                val detail = error.message ?: "Unable to pair with this payload."
-                pairingError = "${error::class.simpleName}: $detail"
+                pairingError = friendlyPairingError(error)
             }
         }
     }
@@ -76,6 +77,26 @@ class PairingViewModel(
             normalized
         }
         return pairingJson.decodeFromString<PairingQrPayload>(jsonPayload)
+    }
+}
+
+private fun friendlyPairingError(error: Throwable): String {
+    return when (error) {
+        is TimeoutCancellationException -> "Pairing timed out. Make sure the Mac bridge is still running, then scan a fresh QR code."
+        is SerializationException -> "This pairing code does not look valid. Scan the QR code shown by the Mac bridge."
+        is IllegalArgumentException -> {
+            val message = error.message.orEmpty()
+            when {
+                message.contains("base64", ignoreCase = true) -> "This pairing code looks corrupted. Scan the latest QR code from the Mac bridge."
+                message.contains("url", ignoreCase = true) -> "The bridge URL in this pairing code is invalid."
+                else -> "Unable to pair with this code. Try scanning the QR code again."
+            }
+        }
+        else -> when {
+            error.message.orEmpty().contains("bridge", ignoreCase = true) ->
+                "Can't reach the Mac bridge right now. Check that it is running, then try again."
+            else -> error.message ?: "Unable to pair with this code."
+        }
     }
 }
 

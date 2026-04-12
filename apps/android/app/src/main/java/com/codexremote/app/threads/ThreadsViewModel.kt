@@ -95,7 +95,7 @@ class ThreadsViewModel(
     }
 
     fun createDefaultThread() {
-        val requestedTitle = newThreadTitle.ifBlank { "New thread" }
+        val requestedTitle = newThreadTitle.ifBlank { "New chat" }
         viewModelScope.launch {
             runCatching {
                 val summary = repository.createThread(requestedTitle)
@@ -142,7 +142,7 @@ class ThreadsViewModel(
                 repository.requestThread(summary.threadId)
                 repository.sendThreadMessage(summary.threadId, buildContinuationPrompt(sourceThread))
                 destination = RootDestination.THREAD_DETAIL
-                transientMessage = "Created a new chat with this thread's context."
+                transientMessage = "Started a writable chat with the latest context."
             }.onFailure(::publishError)
         }
     }
@@ -152,7 +152,7 @@ class ThreadsViewModel(
         viewModelScope.launch {
             runCatching {
                 repository.openThreadInMac(threadId)
-                transientMessage = "Opened in Codex.app"
+                transientMessage = "Opened this chat in Codex.app."
             }.onFailure(::publishError)
         }
     }
@@ -186,14 +186,31 @@ class ThreadsViewModel(
     }
 
     private fun publishError(error: Throwable) {
-        val message = error.message ?: "Something went wrong."
-        if (message.contains("thread not found", ignoreCase = true)) {
+        val rawMessage = error.message.orEmpty()
+        val message = friendlyThreadError(error)
+        if (rawMessage.contains("thread not found", ignoreCase = true)) {
             selectedThread?.threadId?.let(repository::pruneThread)
             repository.clearSelectedThread()
             destination = RootDestination.HOME
             refreshThreads()
         }
         transientMessage = message
+    }
+
+    private fun friendlyThreadError(error: Throwable): String {
+        val message = error.message.orEmpty()
+        return when {
+            message.contains("Not connected to your Mac bridge.", ignoreCase = true) ->
+                "The Mac bridge is offline. Reconnect after the Mac is back online."
+            message.contains("Workspaces are still loading", ignoreCase = true) ->
+                "Still loading workspaces. Try again in a moment."
+            message.contains("thread not found", ignoreCase = true) ->
+                "This chat is no longer available. Refreshing the thread list."
+            message.contains("disconnected", ignoreCase = true) ->
+                "Disconnected from the Mac bridge."
+            message.isBlank() -> "Something went wrong."
+            else -> message
+        }
     }
 
     private fun buildContinuationTitle(title: String): String {

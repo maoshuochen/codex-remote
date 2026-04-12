@@ -63,7 +63,7 @@ fun RootScreen(
     }
     val scanOptions = remember {
         ScanOptions().apply {
-            setPrompt("Scan Codex Remote pairing QR")
+            setPrompt("Scan the Mac bridge QR code")
             setBeepEnabled(false)
             setOrientationLocked(false)
         }
@@ -170,8 +170,8 @@ private fun PairingScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Pair your Mac", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Scan the QR code from the bridge, or paste the pairing payload manually.")
+        Text("Pair your phone", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Scan the QR code shown by the Mac bridge. If scanning fails, paste the pairing code below.")
         pairingViewModel.pairingError?.let { message ->
             Text(
                 text = message,
@@ -187,10 +187,10 @@ private fun PairingScreen(
             onValueChange = pairingViewModel::updateQrText,
             modifier = Modifier.fillMaxWidth(),
             minLines = 6,
-            label = { Text("QR payload") },
+            label = { Text("Pairing code") },
         )
         Button(onClick = pairingViewModel::pairFromRawQr, modifier = Modifier.fillMaxWidth()) {
-            Text("Pair")
+            Text("Pair phone")
         }
     }
 }
@@ -209,6 +209,7 @@ private fun ThreadsHomeScreen(
 ) {
     val runnableThreads = threads.filter { it.status != "read_only" }
     val historyThreads = threads.filter { it.status == "read_only" }
+    val statusCopy = connectionStatusCopy(connectionPhase, runtimeState)
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -217,8 +218,8 @@ private fun ThreadsHomeScreen(
     ) {
         StatusCard(
             title = "Bridge status",
-            primary = connectionPhase.label(),
-            secondary = "Runtime: ${runtimeState.label()}",
+            primary = statusCopy.primary,
+            secondary = statusCopy.secondary,
         )
         OutlinedTextField(
             value = newThreadTitle,
@@ -247,7 +248,7 @@ private fun ThreadsHomeScreen(
             ) {
                 if (runnableThreads.isNotEmpty()) {
                     item {
-                        SectionLabel("Chats")
+                        SectionLabel("Open chats")
                     }
                     items(runnableThreads) { thread ->
                         ThreadRow(thread = thread, onOpenThread = onOpenThread)
@@ -288,6 +289,7 @@ private fun ThreadDetailScreen(
         return
     }
     val readOnly = thread.status == "read_only"
+    val statusCopy = connectionStatusCopy(connectionPhase, runtimeState)
 
     Column(
         modifier = modifier
@@ -296,9 +298,9 @@ private fun ThreadDetailScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         StatusCard(
-            title = "Chat",
-            primary = runtimeState.label(),
-            secondary = "Connection: ${connectionPhase.label()}",
+            title = "Chat status",
+            primary = statusCopy.primary,
+            secondary = statusCopy.secondary,
         )
         if (thread.messages.isEmpty()) {
             EmptyStateCard(
@@ -355,10 +357,15 @@ private fun SettingsScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        val statusCopy = connectionStatusCopy(threadsViewModel.connectionPhase, threadsViewModel.runtimeState)
         StatusCard(
             title = "Connection",
-            primary = threadsViewModel.connectionPhase.label(),
-            secondary = "Runtime: ${threadsViewModel.runtimeState.label()}",
+            primary = statusCopy.primary,
+            secondary = statusCopy.secondary,
+        )
+        EmptyStateCard(
+            title = "What you can do",
+            message = "Reconnect to refresh the session, disconnect to stop syncing, or forget this device to remove pairing.",
         )
         Button(onClick = threadsViewModel::reconnect, modifier = Modifier.fillMaxWidth()) {
             Text("Reconnect")
@@ -387,9 +394,12 @@ private fun ThreadRow(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(thread.title, style = MaterialTheme.typography.titleMedium)
-            Text(thread.lastMessagePreview.ifBlank { "Open this chat to view the conversation." })
-            Text("Status: ${statusOverride ?: thread.status}", style = MaterialTheme.typography.bodySmall)
+            Text(thread.title.ifBlank { "Untitled chat" }, style = MaterialTheme.typography.titleMedium)
+            Text(thread.lastMessagePreview.ifBlank { "Open this chat to view the latest messages." })
+            Text(
+                "Status: ${threadStatusLabel(statusOverride ?: thread.status)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -446,4 +456,68 @@ private fun RuntimeState.label(): String =
         RuntimeState.BUSY -> "Busy"
         RuntimeState.ERROR -> "Error"
         RuntimeState.OFFLINE -> "Offline"
+    }
+
+private data class ConnectionStatusCopy(
+    val primary: String,
+    val secondary: String,
+)
+
+private fun connectionStatusCopy(phase: ConnectionPhase, runtimeState: RuntimeState): ConnectionStatusCopy {
+    return when {
+        phase == ConnectionPhase.NOT_PAIRED -> ConnectionStatusCopy(
+            primary = "Not paired",
+            secondary = "Scan the QR code from the Mac bridge to connect this phone.",
+        )
+        phase == ConnectionPhase.PAIRING -> ConnectionStatusCopy(
+            primary = "Pairing",
+            secondary = "Verifying this phone with the Mac bridge.",
+        )
+        phase == ConnectionPhase.CONNECTING -> ConnectionStatusCopy(
+            primary = "Connecting",
+            secondary = "Reconnecting to your Mac bridge.",
+        )
+        phase == ConnectionPhase.LOADING_CHATS -> ConnectionStatusCopy(
+            primary = "Loading chats",
+            secondary = "Fetching workspaces and recent threads.",
+        )
+        phase == ConnectionPhase.SYNCING -> ConnectionStatusCopy(
+            primary = "Syncing",
+            secondary = "Updating chats and runtime status.",
+        )
+        phase == ConnectionPhase.OFFLINE -> ConnectionStatusCopy(
+            primary = "Offline",
+            secondary = "The bridge is not reachable right now. Try reconnecting from Settings.",
+        )
+        phase == ConnectionPhase.ERROR -> ConnectionStatusCopy(
+            primary = "Needs attention",
+            secondary = "The bridge reported a problem. Try reconnecting or scan a fresh QR code.",
+        )
+        runtimeState == RuntimeState.BUSY -> ConnectionStatusCopy(
+            primary = "Codex is busy",
+            secondary = "The current chat is running. You can keep reading or wait for updates.",
+        )
+        runtimeState == RuntimeState.STARTING -> ConnectionStatusCopy(
+            primary = "Starting",
+            secondary = "Codex is still starting up on the Mac.",
+        )
+        runtimeState == RuntimeState.ERROR -> ConnectionStatusCopy(
+            primary = "Codex error",
+            secondary = "Codex reported an error. Open the chat or wait for a fresh update.",
+        )
+        else -> ConnectionStatusCopy(
+            primary = "Ready",
+            secondary = "You can open a chat or send a follow-up message.",
+        )
+    }
+}
+
+private fun threadStatusLabel(status: String): String =
+    when (val normalized = status.trim().lowercase()) {
+        "" -> "Unknown"
+        "busy" -> "In progress"
+        "idle" -> "Ready"
+        "error" -> "Needs attention"
+        "read_only" -> "Read only"
+        else -> normalized.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }
