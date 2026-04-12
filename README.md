@@ -1,6 +1,59 @@
 # Codex Remote MVP
 
-`Codex Remote` is a local-first MVP for controlling Codex running on a Mac from an Android device over a trusted LAN or Tailscale connection.
+`Codex Remote` is a local-first companion for controlling Codex running on a Mac from an Android device over a trusted LAN or Tailscale connection.
+
+## Product perspective
+
+This is a phone companion for Codex on macOS, not a general remote desktop app.
+
+### Product positioning
+
+- A phone-first way to check status, open threads, and send follow-ups.
+- A simple bridge between one trusted Android device and one trusted Mac runtime.
+- A narrow remote workflow for chat, thread review, and handoff back to `Codex.app`.
+
+### Primary users
+
+- Developers who want to keep using Codex while away from their Mac.
+- People who want to start, continue, or triage chats from their phone.
+- Early adopters who are comfortable with a local trust model.
+
+### Core user jobs
+
+- Check bridge and runtime status.
+- Create a new chat.
+- Review existing threads.
+- Send a follow-up message.
+- Open a thread in `Codex.app` when needed.
+
+### Product value
+
+- Cuts down context switching.
+- Keeps control local and explicit.
+- Preserves workspace boundaries.
+- Makes Codex useful when the laptop is not nearby.
+
+### Product principles
+
+- The Mac stays in charge.
+- Pairing is intentional and one-time.
+- The app controls Codex sessions, not the full desktop.
+- Writable access stays limited to allowed workspaces.
+
+### Typical flow
+
+1. Start the bridge on the Mac and wait for it to be ready.
+2. Scan the one-time QR code from the Android app to pair the device.
+3. Open the home screen to view status and chats.
+4. Create a new chat or open an existing thread.
+5. Send a follow-up message or hand off to `Codex.app`.
+
+### Non-goals
+
+- Replacing the Mac UI with a full remote desktop.
+- Exposing Codex to untrusted networks or anonymous devices.
+- Acting as a screen-mirroring, file-sync, or device-management app.
+- Removing the need for a trusted Mac runtime.
 
 ## What is included
 

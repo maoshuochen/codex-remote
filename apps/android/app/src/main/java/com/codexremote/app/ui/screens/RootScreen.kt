@@ -171,7 +171,7 @@ private fun PairingScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Pair your Mac", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Scan the Remodex-style QR code from the bridge, or paste the pairing payload manually.")
+        Text("Scan the QR code from the bridge, or paste the pairing payload manually.")
         pairingViewModel.pairingError?.let { message ->
             Text(
                 text = message,
@@ -180,17 +180,17 @@ private fun PairingScreen(
             )
         }
         Button(onClick = onLaunchScanner, modifier = Modifier.fillMaxWidth()) {
-            Text("Scan QR Code")
+            Text("Scan QR code")
         }
         OutlinedTextField(
             value = pairingViewModel.qrText,
             onValueChange = pairingViewModel::updateQrText,
             modifier = Modifier.fillMaxWidth(),
             minLines = 6,
-            label = { Text("Pairing payload") },
+            label = { Text("QR payload") },
         )
         Button(onClick = pairingViewModel::pairFromRawQr, modifier = Modifier.fillMaxWidth()) {
-            Text("Pair device")
+            Text("Pair")
         }
     }
 }
@@ -223,12 +223,12 @@ private fun ThreadsHomeScreen(
         OutlinedTextField(
             value = newThreadTitle,
             onValueChange = onTitleChange,
-            label = { Text("New chat title") },
+            label = { Text("Chat title") },
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = onCreateThread) {
-                Text("New Chat")
+                Text("New chat")
             }
             Button(onClick = onRefresh) {
                 Text("Refresh")
@@ -237,7 +237,7 @@ private fun ThreadsHomeScreen(
         if (runnableThreads.isEmpty() && historyThreads.isEmpty()) {
             EmptyStateCard(
                 title = "No chats yet",
-                message = "Create a new chat to start talking to Codex from your phone.",
+                message = "Create a chat to start talking to Codex from your phone.",
             )
         } else {
             LazyColumn(
@@ -296,14 +296,14 @@ private fun ThreadDetailScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         StatusCard(
-            title = "Current chat",
+            title = "Chat",
             primary = runtimeState.label(),
             secondary = "Connection: ${connectionPhase.label()}",
         )
         if (thread.messages.isEmpty()) {
             EmptyStateCard(
                 title = "No messages yet",
-                message = "Send the first instruction to start this chat.",
+                message = "Send the first message to start this chat.",
             )
         } else {
             LazyColumn(
@@ -322,8 +322,8 @@ private fun ThreadDetailScreen(
         }
         if (readOnly) {
             EmptyStateCard(
-                title = "Read-only thread",
-                message = "This older session can be viewed here, but new replies should go into a fresh chat.",
+                title = "Read only",
+                message = "This chat is read only. Start a new chat to continue.",
             )
             Button(onClick = onContinueInNewChat, modifier = Modifier.fillMaxWidth()) {
                 Text("Continue in new chat")
@@ -367,7 +367,7 @@ private fun SettingsScreen(
             Text("Disconnect")
         }
         Button(onClick = pairingViewModel::clearPairing, modifier = Modifier.fillMaxWidth()) {
-            Text("Forget Pair")
+            Text("Forget device")
         }
     }
 }
