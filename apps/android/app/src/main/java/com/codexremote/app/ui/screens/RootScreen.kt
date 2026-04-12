@@ -148,6 +148,7 @@ fun RootScreen(
                     connectionPhase = threadsViewModel.connectionPhase,
                     runtimeState = threadsViewModel.runtimeState,
                     thread = threadsViewModel.selectedThread,
+                    workspaces = threadsViewModel.workspaces,
                     draft = threadsViewModel.draft,
                     onDraftChange = threadsViewModel::updateDraft,
                     onSend = threadsViewModel::sendSelectedThread,
@@ -158,6 +159,7 @@ fun RootScreen(
                     modifier = Modifier.padding(innerPadding),
                     pairingViewModel = pairingViewModel,
                     threadsViewModel = threadsViewModel,
+                    workspaces = threadsViewModel.workspaces,
                 )
             }
         }
@@ -297,6 +299,7 @@ private fun ThreadDetailScreen(
     connectionPhase: ConnectionPhase,
     runtimeState: RuntimeState,
     thread: ThreadDetail?,
+    workspaces: List<WorkspaceSummary>,
     draft: String,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
@@ -321,6 +324,10 @@ private fun ThreadDetailScreen(
             title = "Chat status",
             primary = statusCopy.primary,
             secondary = statusCopy.secondary,
+        )
+        EmptyStateCard(
+            title = "Chat info",
+            message = buildThreadInfoMessage(thread, workspaces),
         )
         if (thread.messages.isEmpty()) {
             EmptyStateCard(
@@ -370,6 +377,7 @@ private fun SettingsScreen(
     modifier: Modifier = Modifier,
     pairingViewModel: PairingViewModel,
     threadsViewModel: ThreadsViewModel,
+    workspaces: List<WorkspaceSummary>,
 ) {
     Column(
         modifier = modifier
@@ -387,6 +395,12 @@ private fun SettingsScreen(
             title = "What you can do",
             message = "Reconnect to refresh the session, disconnect to stop syncing, or forget this device to remove pairing.",
         )
+        if (workspaces.isNotEmpty()) {
+            EmptyStateCard(
+                title = "Allowed workspaces",
+                message = buildWorkspaceSummary(workspaces),
+            )
+        }
         Button(onClick = threadsViewModel::reconnect, modifier = Modifier.fillMaxWidth()) {
             Text("Reconnect")
         }
@@ -574,6 +588,21 @@ private fun buildQuickActionMessage(thread: ThreadSummary, workspaces: List<Work
     val workspaceName = workspaceNameFor(thread.workspaceId, workspaces)
     val preview = thread.lastMessagePreview.ifBlank { "No recent message preview is available." }
     return "Workspace: $workspaceName. Updated ${formatThreadUpdatedAt(thread.updatedAt)}. $preview"
+}
+
+private fun buildThreadInfoMessage(thread: ThreadDetail, workspaces: List<WorkspaceSummary>): String {
+    val workspaceName = workspaceNameFor(thread.workspaceId, workspaces)
+    val messageCount = thread.messages.size
+    val threadLabel = thread.title.ifBlank { "Untitled chat" }
+    return "Chat: $threadLabel. Workspace: $workspaceName. Messages: $messageCount. Thread ID: ${thread.threadId}"
+}
+
+private fun buildWorkspaceSummary(workspaces: List<WorkspaceSummary>): String {
+    return workspaces.joinToString("\n\n") { workspace ->
+        val name = workspace.name.ifBlank { workspace.workspaceId }
+        val root = workspace.root.ifBlank { "Unknown path" }
+        "$name\n$root"
+    }
 }
 
 private fun formatThreadUpdatedAt(value: String): String {
