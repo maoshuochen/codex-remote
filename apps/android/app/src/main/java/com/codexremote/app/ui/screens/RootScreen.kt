@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -36,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -322,6 +324,14 @@ private fun ThreadDetailScreen(
     }
     val readOnly = thread.status == "read_only"
     val statusCopy = connectionStatusCopy(connectionPhase, runtimeState)
+    val messageListState = rememberLazyListState()
+
+    LaunchedEffect(thread.threadId, thread.messages.size) {
+        if (thread.messages.isNotEmpty()) {
+            withFrameNanos { }
+            messageListState.animateScrollToItem(thread.messages.lastIndex)
+        }
+    }
 
     Column(
         modifier = modifier
@@ -345,6 +355,7 @@ private fun ThreadDetailScreen(
             )
         } else {
             LazyColumn(
+                state = messageListState,
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
