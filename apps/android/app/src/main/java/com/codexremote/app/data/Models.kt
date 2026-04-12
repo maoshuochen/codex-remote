@@ -40,6 +40,7 @@ data class ThreadMessage(
     val id: String,
     val role: String,
     val text: String,
+    val createdAt: String? = null,
 )
 
 data class ThreadDetail(

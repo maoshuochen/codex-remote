@@ -444,6 +444,7 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                 id = obj.string("id"),
                 role = obj.string("role"),
                 text = obj.string("text"),
+                createdAt = obj.string("createdAt").ifBlank { null },
             )
         }
         return ThreadDetail(
@@ -496,6 +497,7 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                         id = "streaming-$threadId",
                         role = "assistant",
                         text = chunk,
+                        createdAt = null,
                     )
                 )
             }

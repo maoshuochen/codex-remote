@@ -345,6 +345,12 @@ private fun ThreadDetailScreen(
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(message.role.replaceFirstChar(Char::titlecase), fontWeight = FontWeight.SemiBold)
                             Text(message.text.ifBlank { "(empty message)" })
+                            message.createdAt?.let { createdAt ->
+                                Text(
+                                    text = formatMessageCreatedAt(createdAt),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
                         }
                     }
                 }
@@ -640,5 +646,15 @@ private fun formatThreadUpdatedAt(value: String): String {
         localDateTime.format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))
     }.getOrElse {
         value.ifBlank { "recently" }
+    }
+}
+
+private fun formatMessageCreatedAt(value: String): String {
+    return runCatching {
+        val instant = OffsetDateTime.parse(value).toInstant()
+        val localDateTime = instant.atZone(ZoneId.systemDefault())
+        localDateTime.format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))
+    }.getOrElse {
+        value.ifBlank { "" }
     }
 }
