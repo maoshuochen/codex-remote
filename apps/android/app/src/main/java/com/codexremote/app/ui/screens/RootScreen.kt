@@ -223,6 +223,7 @@ private fun ThreadsHomeScreen(
     val historyThreads = threads.filter { it.status == "read_only" }.sortedByDescending { it.updatedAt }
     val latestRunnableThread = runnableThreads.firstOrNull()
     val statusCopy = connectionStatusCopy(connectionPhase, runtimeState)
+    val defaultWorkspace = workspaces.firstOrNull()
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -242,6 +243,10 @@ private fun ThreadsHomeScreen(
                 onClick = { onOpenThread(latestRunnableThread.threadId) },
             )
         }
+        EmptyStateCard(
+            title = "New chat workspace",
+            message = buildDefaultWorkspaceMessage(defaultWorkspace),
+        )
         OutlinedTextField(
             value = newThreadTitle,
             onValueChange = onTitleChange,
@@ -395,6 +400,10 @@ private fun SettingsScreen(
         EmptyStateCard(
             title = "What you can do",
             message = "Reconnect to refresh the session, disconnect to stop syncing, or forget this device to remove pairing.",
+        )
+        EmptyStateCard(
+            title = "New chat workspace",
+            message = buildDefaultWorkspaceMessage(workspaces.firstOrNull()),
         )
         EmptyStateCard(
             title = "Trusted device",
@@ -681,6 +690,15 @@ private fun buildWorkspaceSummary(workspaces: List<WorkspaceSummary>): String {
         val root = workspace.root.ifBlank { "Unknown path" }
         "$name\n$root"
     }
+}
+
+private fun buildDefaultWorkspaceMessage(workspace: WorkspaceSummary?): String {
+    if (workspace == null) {
+        return "No workspace is available yet."
+    }
+    val name = workspace.name.ifBlank { workspace.workspaceId }
+    val root = workspace.root.ifBlank { "Unknown path" }
+    return "$name\n$root"
 }
 
 private fun buildTrustedBridgeLabel(url: String?): String {
