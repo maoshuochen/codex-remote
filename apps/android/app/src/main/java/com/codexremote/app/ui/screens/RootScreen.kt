@@ -44,10 +44,14 @@ import com.codexremote.app.data.RootDestination
 import com.codexremote.app.data.RuntimeState
 import com.codexremote.app.data.ThreadDetail
 import com.codexremote.app.data.ThreadSummary
+import com.codexremote.app.data.WorkspaceSummary
 import com.codexremote.app.pairing.PairingViewModel
 import com.codexremote.app.threads.ThreadsViewModel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,6 +136,7 @@ fun RootScreen(
                     runtimeState = threadsViewModel.runtimeState,
                     newThreadTitle = threadsViewModel.newThreadTitle,
                     threads = threadsViewModel.threads,
+                    workspaces = threadsViewModel.workspaces,
                     onTitleChange = threadsViewModel::updateNewThreadTitle,
                     onCreateThread = threadsViewModel::createDefaultThread,
                     onOpenThread = threadsViewModel::openThread,
@@ -202,13 +207,15 @@ private fun ThreadsHomeScreen(
     runtimeState: RuntimeState,
     newThreadTitle: String,
     threads: List<ThreadSummary>,
+    workspaces: List<WorkspaceSummary>,
     onTitleChange: (String) -> Unit,
     onCreateThread: () -> Unit,
     onOpenThread: (String) -> Unit,
     onRefresh: () -> Unit,
 ) {
-    val runnableThreads = threads.filter { it.status != "read_only" }
-    val historyThreads = threads.filter { it.status == "read_only" }
+    val runnableThreads = threads.filter { it.status != "read_only" }.sortedByDescending { it.updatedAt }
+    val historyThreads = threads.filter { it.status == "read_only" }.sortedByDescending { it.updatedAt }
+    val latestRunnableThread = runnableThreads.firstOrNull()
     val statusCopy = connectionStatusCopy(connectionPhase, runtimeState)
     Column(
         modifier = modifier
@@ -221,6 +228,14 @@ private fun ThreadsHomeScreen(
             primary = statusCopy.primary,
             secondary = statusCopy.secondary,
         )
+        if (latestRunnableThread != null) {
+            QuickActionCard(
+                title = "Continue latest chat",
+                message = buildQuickActionMessage(latestRunnableThread, workspaces),
+                actionText = "Open latest",
+                onClick = { onOpenThread(latestRunnableThread.threadId) },
+            )
+        }
         OutlinedTextField(
             value = newThreadTitle,
             onValueChange = onTitleChange,
@@ -238,7 +253,7 @@ private fun ThreadsHomeScreen(
         if (runnableThreads.isEmpty() && historyThreads.isEmpty()) {
             EmptyStateCard(
                 title = "No chats yet",
-                message = "Create a chat to start talking to Codex from your phone.",
+                message = "Create a chat to start talking to Codex from your phone. It will appear here once it starts.",
             )
         } else {
             LazyColumn(
@@ -251,7 +266,11 @@ private fun ThreadsHomeScreen(
                         SectionLabel("Open chats")
                     }
                     items(runnableThreads) { thread ->
-                        ThreadRow(thread = thread, onOpenThread = onOpenThread)
+                        ThreadRow(
+                            thread = thread,
+                            workspaceName = workspaceNameFor(thread.workspaceId, workspaces),
+                            onOpenThread = onOpenThread,
+                        )
                     }
                 }
                 if (historyThreads.isNotEmpty()) {
@@ -261,6 +280,7 @@ private fun ThreadsHomeScreen(
                     items(historyThreads) { thread ->
                         ThreadRow(
                             thread = thread,
+                            workspaceName = workspaceNameFor(thread.workspaceId, workspaces),
                             onOpenThread = onOpenThread,
                             statusOverride = "Read only",
                         )
@@ -382,6 +402,7 @@ private fun SettingsScreen(
 @Composable
 private fun ThreadRow(
     thread: ThreadSummary,
+    workspaceName: String,
     onOpenThread: (String) -> Unit,
     statusOverride: String? = null,
 ) {
@@ -396,6 +417,7 @@ private fun ThreadRow(
         ) {
             Text(thread.title.ifBlank { "Untitled chat" }, style = MaterialTheme.typography.titleMedium)
             Text(thread.lastMessagePreview.ifBlank { "Open this chat to view the latest messages." })
+            Text("Workspace: $workspaceName", style = MaterialTheme.typography.bodySmall)
             Text(
                 "Status: ${threadStatusLabel(statusOverride ?: thread.status)}",
                 style = MaterialTheme.typography.bodySmall,
@@ -433,6 +455,24 @@ private fun EmptyStateCard(
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(message)
+        }
+    }
+}
+
+@Composable
+private fun QuickActionCard(
+    title: String,
+    message: String,
+    actionText: String,
+    onClick: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(message)
+            Button(onClick = onClick) {
+                Text(actionText)
+            }
         }
     }
 }
@@ -521,3 +561,27 @@ private fun threadStatusLabel(status: String): String =
         "read_only" -> "Read only"
         else -> normalized.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }
+
+private fun workspaceNameFor(workspaceId: String, workspaces: List<WorkspaceSummary>): String {
+    if (workspaceId.isBlank()) {
+        return "Unknown workspace"
+    }
+    return workspaces.firstOrNull { it.workspaceId == workspaceId }?.name
+        ?: workspaceId
+}
+
+private fun buildQuickActionMessage(thread: ThreadSummary, workspaces: List<WorkspaceSummary>): String {
+    val workspaceName = workspaceNameFor(thread.workspaceId, workspaces)
+    val preview = thread.lastMessagePreview.ifBlank { "No recent message preview is available." }
+    return "Workspace: $workspaceName. Updated ${formatThreadUpdatedAt(thread.updatedAt)}. $preview"
+}
+
+private fun formatThreadUpdatedAt(value: String): String {
+    return runCatching {
+        val instant = OffsetDateTime.parse(value).toInstant()
+        val localDateTime = instant.atZone(ZoneId.systemDefault())
+        localDateTime.format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))
+    }.getOrElse {
+        value.ifBlank { "recently" }
+    }
+}

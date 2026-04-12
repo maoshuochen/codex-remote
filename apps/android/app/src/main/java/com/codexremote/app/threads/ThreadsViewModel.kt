@@ -10,6 +10,7 @@ import com.codexremote.app.data.RootDestination
 import com.codexremote.app.data.RuntimeState
 import com.codexremote.app.data.ThreadDetail
 import com.codexremote.app.data.ThreadSummary
+import com.codexremote.app.data.WorkspaceSummary
 import com.codexremote.app.network.BridgeRepository
 import kotlinx.coroutines.launch
 
@@ -17,6 +18,9 @@ class ThreadsViewModel(
     private val repository: BridgeRepository,
 ) : ViewModel() {
     var threads by mutableStateOf<List<ThreadSummary>>(emptyList())
+        private set
+
+    var workspaces by mutableStateOf<List<WorkspaceSummary>>(emptyList())
         private set
 
     var selectedThread by mutableStateOf<ThreadDetail?>(null)
@@ -46,6 +50,9 @@ class ThreadsViewModel(
         }
         viewModelScope.launch {
             repository.threads.collect { threads = it }
+        }
+        viewModelScope.launch {
+            repository.workspaces.collect { workspaces = it }
         }
         viewModelScope.launch {
             repository.selectedThread.collect { thread ->
