@@ -23,6 +23,12 @@ class ThreadsViewModel(
     var workspaces by mutableStateOf<List<WorkspaceSummary>>(emptyList())
         private set
 
+    var pairingBridgeUrl by mutableStateOf<String?>(null)
+        private set
+
+    var pairingDeviceId by mutableStateOf<String?>(null)
+        private set
+
     var selectedThread by mutableStateOf<ThreadDetail?>(null)
         private set
 
@@ -53,6 +59,12 @@ class ThreadsViewModel(
         }
         viewModelScope.launch {
             repository.workspaces.collect { workspaces = it }
+        }
+        viewModelScope.launch {
+            repository.pairingBridgeUrl.collect { pairingBridgeUrl = it }
+        }
+        viewModelScope.launch {
+            repository.pairingDeviceId.collect { pairingDeviceId = it }
         }
         viewModelScope.launch {
             repository.selectedThread.collect { thread ->

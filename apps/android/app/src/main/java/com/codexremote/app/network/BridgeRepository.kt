@@ -70,6 +70,8 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
     val runtimeState: Flow<RuntimeState> = _runtimeState.asStateFlow()
     val bridgeErrors: Flow<String> = _bridgeErrors.asSharedFlow()
     val workspaces: Flow<List<WorkspaceSummary>> = _workspaces.asStateFlow()
+    val pairingBridgeUrl: Flow<String?> = deviceStore.bridgeUrl
+    val pairingDeviceId: Flow<String?> = deviceStore.deviceId
 
     suspend fun pair(qrPayload: PairingQrPayload) {
         val seed = ByteArray(32).also(SecureRandom()::nextBytes)

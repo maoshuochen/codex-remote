@@ -52,6 +52,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.net.URI
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -379,6 +380,8 @@ private fun SettingsScreen(
     threadsViewModel: ThreadsViewModel,
     workspaces: List<WorkspaceSummary>,
 ) {
+    val trustedBridge = buildTrustedBridgeLabel(threadsViewModel.pairingBridgeUrl)
+    val trustedDevice = buildTrustedDeviceLabel(threadsViewModel.pairingDeviceId)
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -394,6 +397,10 @@ private fun SettingsScreen(
         EmptyStateCard(
             title = "What you can do",
             message = "Reconnect to refresh the session, disconnect to stop syncing, or forget this device to remove pairing.",
+        )
+        EmptyStateCard(
+            title = "Trusted device",
+            message = "Bridge: $trustedBridge\nDevice: $trustedDevice",
         )
         if (workspaces.isNotEmpty()) {
             EmptyStateCard(
@@ -603,6 +610,27 @@ private fun buildWorkspaceSummary(workspaces: List<WorkspaceSummary>): String {
         val root = workspace.root.ifBlank { "Unknown path" }
         "$name\n$root"
     }
+}
+
+private fun buildTrustedBridgeLabel(url: String?): String {
+    if (url.isNullOrBlank()) {
+        return "Unknown bridge"
+    }
+    return runCatching {
+        val uri = URI(url)
+        val host = uri.host ?: uri.authority ?: url
+        if (uri.port > 0) "$host:${uri.port}" else host
+    }.getOrElse {
+        url
+    }
+}
+
+private fun buildTrustedDeviceLabel(deviceId: String?): String {
+    val trimmed = deviceId?.trim().orEmpty()
+    if (trimmed.isBlank()) {
+        return "Unknown device"
+    }
+    return trimmed.takeLast(8)
 }
 
 private fun formatThreadUpdatedAt(value: String): String {
