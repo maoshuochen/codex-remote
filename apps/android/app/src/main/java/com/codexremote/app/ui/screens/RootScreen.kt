@@ -221,9 +221,10 @@ private fun ThreadsHomeScreen(
     onOpenThread: (String) -> Unit,
     onRefresh: () -> Unit,
 ) {
-    val runnableThreads = threads.filter { it.status != "read_only" }.sortedByDescending { it.updatedAt }
+    val activeThreads = threads.filter { it.status == "busy" }.sortedByDescending { it.updatedAt }
+    val readyThreads = threads.filter { it.status != "read_only" && it.status != "busy" }.sortedByDescending { it.updatedAt }
     val historyThreads = threads.filter { it.status == "read_only" }.sortedByDescending { it.updatedAt }
-    val latestRunnableThread = runnableThreads.firstOrNull()
+    val latestRunnableThread = (activeThreads + readyThreads).firstOrNull()
     val statusCopy = connectionStatusCopy(connectionPhase, runtimeState)
     val defaultWorkspace = workspaces.firstOrNull()
     Column(
@@ -263,7 +264,7 @@ private fun ThreadsHomeScreen(
                 Text("Refresh")
             }
         }
-        if (runnableThreads.isEmpty() && historyThreads.isEmpty()) {
+        if (activeThreads.isEmpty() && readyThreads.isEmpty() && historyThreads.isEmpty()) {
             EmptyStateCard(
                 title = "No chats yet",
                 message = "Create a chat to start talking to Codex from your phone. It will appear here once it starts.",
@@ -274,11 +275,23 @@ private fun ThreadsHomeScreen(
                 contentPadding = PaddingValues(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (runnableThreads.isNotEmpty()) {
+                if (activeThreads.isNotEmpty()) {
                     item {
-                        SectionLabel("Open chats")
+                        SectionLabel("Running now")
                     }
-                    items(runnableThreads) { thread ->
+                    items(activeThreads) { thread ->
+                        ThreadRow(
+                            thread = thread,
+                            workspaceName = workspaceNameFor(thread.workspaceId, workspaces),
+                            onOpenThread = onOpenThread,
+                        )
+                    }
+                }
+                if (readyThreads.isNotEmpty()) {
+                    item {
+                        SectionLabel("Ready to reply")
+                    }
+                    items(readyThreads) { thread ->
                         ThreadRow(
                             thread = thread,
                             workspaceName = workspaceNameFor(thread.workspaceId, workspaces),
@@ -323,6 +336,7 @@ private fun ThreadDetailScreen(
         return
     }
     val readOnly = thread.status == "read_only"
+    val threadState = threadStatusLabel(thread.status)
     val statusCopy = connectionStatusCopy(connectionPhase, runtimeState)
     val messageListState = rememberLazyListState()
 
@@ -345,8 +359,8 @@ private fun ThreadDetailScreen(
             secondary = statusCopy.secondary,
         )
         EmptyStateCard(
-            title = "Chat info",
-            message = buildThreadInfoMessage(thread, workspaces),
+            title = "Thread info",
+            message = buildThreadInfoMessage(thread, workspaces, threadState),
         )
         if (thread.messages.isEmpty()) {
             EmptyStateCard(
@@ -688,11 +702,15 @@ private fun buildQuickActionMessage(thread: ThreadSummary, workspaces: List<Work
     return "Workspace: $workspaceName. Updated ${formatThreadUpdatedAt(thread.updatedAt)}. $preview"
 }
 
-private fun buildThreadInfoMessage(thread: ThreadDetail, workspaces: List<WorkspaceSummary>): String {
+private fun buildThreadInfoMessage(
+    thread: ThreadDetail,
+    workspaces: List<WorkspaceSummary>,
+    threadState: String,
+): String {
     val workspaceName = workspaceNameFor(thread.workspaceId, workspaces)
     val messageCount = thread.messages.size
     val threadLabel = thread.title.ifBlank { "Untitled chat" }
-    return "Chat: $threadLabel. Workspace: $workspaceName. Messages: $messageCount. Thread ID: ${thread.threadId}"
+    return "Chat: $threadLabel. Workspace: $workspaceName. Messages: $messageCount. State: $threadState. Thread ID: ${thread.threadId}"
 }
 
 private fun buildWorkspaceSummary(workspaces: List<WorkspaceSummary>): String {
