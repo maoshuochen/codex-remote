@@ -471,6 +471,7 @@ private fun ThreadRow(
             Text(thread.title.ifBlank { "Untitled chat" }, style = MaterialTheme.typography.titleMedium)
             Text(thread.lastMessagePreview.ifBlank { "Open this chat to view the latest messages." })
             Text("Workspace: $workspaceName", style = MaterialTheme.typography.bodySmall)
+            Text("Updated: ${formatThreadUpdatedAt(thread.updatedAt)}", style = MaterialTheme.typography.bodySmall)
             Text(
                 "Status: ${threadStatusLabel(statusOverride ?: thread.status)}",
                 style = MaterialTheme.typography.bodySmall,
