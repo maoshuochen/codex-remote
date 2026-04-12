@@ -13,7 +13,26 @@ async function main(): Promise<void> {
   await codexClient.start();
 
   const bridge = new BridgeServer(config, identity, codexClient);
-  await bridge.start();
+  const shutdown = async (): Promise<void> => {
+    log("info", "shutting down bridge");
+    bridge.stop();
+    codexClient.stop();
+    log("info", "bridge stopped");
+  };
+
+  process.once("SIGINT", () => {
+    void shutdown().finally(() => process.exit(0));
+  });
+  process.once("SIGTERM", () => {
+    void shutdown().finally(() => process.exit(0));
+  });
+
+  try {
+    await bridge.start();
+  } catch (error) {
+    await shutdown();
+    throw error;
+  }
 }
 
 main().catch((error) => {

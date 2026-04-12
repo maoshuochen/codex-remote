@@ -87,3 +87,51 @@ test("session index matches workspace boundaries without prefix collisions", () 
 
   assert.equal(summary.workspaceId, "tmp-project2");
 });
+
+test("session index excludes threads outside the allowed workspaces", () => {
+  const sessions = new SessionIndex();
+  const summaries = sessions.hydrateFromCodexThreads(
+    [
+      {
+        id: "thread-allowed",
+        preview: "allowed",
+        updatedAt: 1_710_000_002,
+        status: "ready",
+        cwd: "/tmp/project",
+        name: "Allowed",
+        turns: [],
+      },
+      {
+        id: "thread-blocked",
+        preview: "blocked",
+        updatedAt: 1_710_000_003,
+        status: "ready",
+        cwd: "/opt/elsewhere",
+        name: "Blocked",
+        turns: [],
+      },
+    ],
+    ["/tmp/project"],
+  );
+
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0]?.threadId, "thread-allowed");
+});
+
+test("session index returns null for thread details outside the allowed workspaces", () => {
+  const sessions = new SessionIndex();
+  const detail = sessions.toThreadDetail(
+    {
+      id: "thread-blocked",
+      preview: "blocked",
+      updatedAt: 1_710_000_003,
+      status: "ready",
+      cwd: "/opt/elsewhere",
+      name: "Blocked",
+      turns: [],
+    },
+    ["/tmp/project"],
+  );
+
+  assert.equal(detail, null);
+});

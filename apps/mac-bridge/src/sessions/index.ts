@@ -46,17 +46,29 @@ export class SessionIndex {
   }
 
   hydrateFromCodexThreads(threads: CodexThread[], workspaceRoots: string[]): ThreadSummary[] {
-    return threads.map((thread) => ({
-      threadId: thread.id,
-      title: thread.name ?? (thread.preview || "Untitled thread"),
-      updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
-      workspaceId: matchWorkspaceId(thread.cwd, workspaceRoots),
-      lastMessagePreview: thread.preview ?? "",
-      status: normalizeStatus(thread.status),
-    }));
+    return threads.flatMap((thread) => {
+      const workspaceId = matchWorkspaceId(thread.cwd, workspaceRoots);
+      if (!workspaceId) {
+        return [];
+      }
+
+      return [{
+        threadId: thread.id,
+        title: thread.name ?? (thread.preview || "Untitled thread"),
+        updatedAt: new Date(thread.updatedAt * 1000).toISOString(),
+        workspaceId,
+        lastMessagePreview: thread.preview ?? "",
+        status: normalizeStatus(thread.status),
+      }];
+    });
   }
 
-  toThreadDetail(thread: CodexThread, workspaceRoots: string[]): ThreadDetail {
+  toThreadDetail(thread: CodexThread, workspaceRoots: string[]): ThreadDetail | null {
+    const workspaceId = matchWorkspaceId(thread.cwd, workspaceRoots);
+    if (!workspaceId) {
+      return null;
+    }
+
     const messages: ThreadMessage[] = [];
     for (const turn of thread.turns) {
       for (const item of turn.items) {
@@ -84,7 +96,7 @@ export class SessionIndex {
     return {
       threadId: thread.id,
       title: thread.name ?? (thread.preview || "Untitled thread"),
-      workspaceId: matchWorkspaceId(thread.cwd, workspaceRoots),
+      workspaceId,
       messages,
       status: normalizeStatus(thread.status),
     };
@@ -95,9 +107,12 @@ function slugifyWorkspace(input: string): string {
   return input.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "default";
 }
 
-function matchWorkspaceId(cwd: string, workspaceRoots: string[]): string {
+function matchWorkspaceId(cwd: string, workspaceRoots: string[]): string | null {
   const exact = workspaceRoots.find((root) => isWithinWorkspace(cwd, root));
-  return slugifyWorkspace(exact ?? workspaceRoots[0] ?? cwd);
+  if (!exact) {
+    return null;
+  }
+  return slugifyWorkspace(exact);
 }
 
 function isWithinWorkspace(cwd: string, root: string): boolean {

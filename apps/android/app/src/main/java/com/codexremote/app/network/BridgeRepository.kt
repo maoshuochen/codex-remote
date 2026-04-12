@@ -15,11 +15,13 @@ import com.codexremote.app.data.objectValue
 import com.codexremote.app.data.string
 import java.security.SecureRandom
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -55,12 +57,12 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
     private var bridgeUrl: String? = null
     private var pairedDeviceId: String? = null
     private var privateKeyBase64: String? = null
-    private var defaultWorkspaceId: String? = null
     private var pendingPairPayload: JsonObject? = null
+    private var pendingPairConfirmation: CompletableDeferred<JsonObject?>? = null
     private var trusted = false
     private var reconnectAllowed = false
-    private var bootstrapComplete = false
-    private val pendingReplies = mutableMapOf<String, PendingReply>()
+    private var closed = false
+    private val pendingReplies = ConcurrentHashMap<String, PendingReply>()
 
     val threads: Flow<List<ThreadSummary>> = _threads.asStateFlow()
     val selectedThread: Flow<ThreadDetail?> = _selectedThread.asStateFlow()
@@ -75,12 +77,13 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
         val privateKeyPem = seed.encodeBase64()
         val publicKeyPem = encodePem("PUBLIC KEY", ED25519_SPKI_PREFIX + privateKey.generatePublicKey().encoded)
         val deviceId = UUID.randomUUID().toString()
+        val confirmation = CompletableDeferred<JsonObject?>()
         pairedDeviceId = deviceId
         privateKeyBase64 = privateKeyPem
         bridgeUrl = qrPayload.bridgeUrl
         trusted = false
         reconnectAllowed = true
-        bootstrapComplete = false
+        pendingPairConfirmation = confirmation
         _connectionPhase.value = ConnectionPhase.PAIRING
         pendingPairPayload = buildJsonObject {
             put("pairingToken", qrPayload.pairingToken)
@@ -90,7 +93,15 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
         }
         deviceStore.savePairing(qrPayload.bridgeUrl, deviceId, privateKeyPem)
         connect(qrPayload.bridgeUrl)
-        waitForReply("pair.confirm", 20.seconds)
+        try {
+            withTimeout(20.seconds) {
+                confirmation.await()
+            }
+        } finally {
+            if (pendingPairConfirmation === confirmation) {
+                pendingPairConfirmation = null
+            }
+        }
     }
 
     suspend fun restoreSession() {
@@ -122,8 +133,20 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                     pendingPairPayload?.let { payload ->
                         scope.launch {
                             runCatching {
-                                sendForReply("pair.request", payload, "pair.confirm")
-                            }.onFailure(::publishError)
+                                sendForReply("pair.request", payload)
+                            }.onSuccess { confirmPayload ->
+                                pendingPairConfirmation?.complete(confirmPayload)
+                                pendingPairConfirmation = null
+                                trusted = true
+                                reconnectAllowed = true
+                                pendingPairPayload = null
+                                _connectionPhase.value = ConnectionPhase.LOADING_CHATS
+                                requestBootstrapData()
+                            }.onFailure { error ->
+                                pendingPairConfirmation?.completeExceptionally(error)
+                                pendingPairConfirmation = null
+                                publishError(error)
+                            }
                         }
                     }
                 }
@@ -166,25 +189,9 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                         }
                         "workspace.list" -> {
                             _workspaces.value = decodeWorkspaces(payload)
-                            defaultWorkspaceId = _workspaces.value.firstOrNull()?.workspaceId
                             _connectionPhase.value = ConnectionPhase.SYNCING
                         }
-                        "runtime.status" -> _runtimeState.value = payload.toRuntimeState()
-                        "pair.confirm" -> {
-                            trusted = true
-                            reconnectAllowed = true
-                            pendingPairPayload = null
-                            bootstrapComplete = false
-                            _connectionPhase.value = ConnectionPhase.LOADING_CHATS
-                            requestBootstrapData()
-                        }
-                        "auth.response" -> {
-                            trusted = true
-                            reconnectAllowed = true
-                            bootstrapComplete = false
-                            _connectionPhase.value = ConnectionPhase.LOADING_CHATS
-                            requestBootstrapData()
-                        }
+                        "runtime.status" -> _runtimeState.value = payload.runtimeState()
                         "error" -> {
                             val error = payload?.let { json.decodeFromJsonElement<ErrorPayload>(it) }
                             error?.message?.let(_bridgeErrors::tryEmit)
@@ -193,16 +200,16 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                             }
                         }
                     }
-                    if (message.type == "thread.list" && !bootstrapComplete) {
-                        bootstrapComplete = true
+                    if (message.type == "thread.list") {
                         _connectionPhase.value = ConnectionPhase.READY
                     }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     socket = null
-                    pendingReplies.values.forEach { reply -> reply.deferred.completeExceptionally(t) }
-                    pendingReplies.clear()
+                    failPendingReplies(t)
+                    pendingPairConfirmation?.completeExceptionally(t)
+                    pendingPairConfirmation = null
                     _runtimeState.value = RuntimeState.OFFLINE
                     _connectionPhase.value =
                         if (reconnectAllowed) ConnectionPhase.OFFLINE else ConnectionPhase.NOT_PAIRED
@@ -211,6 +218,9 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     socket = null
+                    failPendingReplies(IllegalStateException(reason.ifBlank { "WebSocket closed." }))
+                    pendingPairConfirmation?.completeExceptionally(IllegalStateException(reason.ifBlank { "WebSocket closed." }))
+                    pendingPairConfirmation = null
                     _runtimeState.value = RuntimeState.OFFLINE
                     _connectionPhase.value =
                         if (reconnectAllowed) ConnectionPhase.OFFLINE else ConnectionPhase.NOT_PAIRED
@@ -228,15 +238,26 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
             return
         }
         trusted = true
-        bootstrapComplete = false
         connect(url)
     }
 
     fun disconnect() {
         socket?.close(1000, "disconnect")
         socket = null
+        failPendingReplies(IllegalStateException("Disconnected from bridge."))
+        pendingPairConfirmation?.completeExceptionally(IllegalStateException("Pairing was cancelled."))
+        pendingPairConfirmation = null
         _connectionPhase.value = if (reconnectAllowed) ConnectionPhase.OFFLINE else ConnectionPhase.NOT_PAIRED
         _runtimeState.value = RuntimeState.OFFLINE
+    }
+
+    fun close() {
+        if (closed) {
+            return
+        }
+        closed = true
+        disconnect()
+        scope.cancel()
     }
 
     suspend fun clearPairing() {
@@ -245,9 +266,10 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
         bridgeUrl = null
         pairedDeviceId = null
         privateKeyBase64 = null
-        defaultWorkspaceId = null
         pendingPairPayload = null
-        bootstrapComplete = false
+        pendingPairConfirmation?.completeExceptionally(IllegalStateException("Pairing was cleared."))
+        pendingPairConfirmation = null
+        failPendingReplies(IllegalStateException("Pairing was cleared."))
         socket?.close(1000, "clear-pairing")
         socket = null
         _threads.value = emptyList()
@@ -273,7 +295,7 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
     }
 
     suspend fun requestThreadList() {
-        sendForReply("thread.list", buildJsonObject {}, "thread.list")
+        sendForReply("thread.list", buildJsonObject {})
     }
 
     suspend fun requestThread(threadId: String): ThreadDetail {
@@ -282,14 +304,13 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
             buildJsonObject {
                 put("threadId", threadId)
             },
-            "thread.get",
         )
         return decodeThreadDetail(payload)
             ?: throw IllegalStateException("Thread detail payload was missing.")
     }
 
     suspend fun createThread(title: String): ThreadSummary {
-        val workspaceId = defaultWorkspaceId
+        val workspaceId = _workspaces.value.firstOrNull()?.workspaceId
             ?: throw IllegalStateException("Workspaces are still loading. Try again in a moment.")
         val payload = sendForReply(
             "thread.create",
@@ -297,7 +318,6 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                 put("workspaceId", workspaceId)
                 put("title", title)
             },
-            "thread.create",
         )
         val summary = decodeThreadSummary(payload?.objectValue("thread"))
             ?: throw IllegalStateException("Thread creation did not return a thread.")
@@ -313,7 +333,6 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                 put("threadId", threadId)
                 put("message", message)
             },
-            "thread.send",
         )
     }
 
@@ -323,7 +342,6 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
             buildJsonObject {
                 put("threadId", threadId)
             },
-            "thread.open_in_codex_app",
         )
     }
 
@@ -345,44 +363,33 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                         put("challengeId", challengeId)
                         put("signature", signature)
                     },
-                    "auth.response",
                 )
             }.onFailure(::publishError)
         }
     }
 
-    private suspend fun sendForReply(type: String, payload: JsonObject, expectedType: String): JsonObject? {
+    private suspend fun sendForReply(type: String, payload: JsonObject): JsonObject? {
         val requestId = UUID.randomUUID().toString()
         val deferred = CompletableDeferred<JsonObject?>()
-        pendingReplies[requestId] = PendingReply(expectedType, deferred)
-        val sent = socket?.send(
-            json.encodeToString(
-                BridgeEnvelope(
-                    type = type,
-                    requestId = requestId,
-                    payload = payload,
-                )
-            )
-        ) ?: false
-        if (!sent) {
-            pendingReplies.remove(requestId)
-            throw IllegalStateException("Not connected to your Mac bridge.")
-        }
-        return withTimeout(20.seconds) {
-            deferred.await()
-        }
-    }
-
-    private suspend fun waitForReply(expectedType: String, timeout: kotlin.time.Duration): JsonObject? {
-        val deferred = CompletableDeferred<JsonObject?>()
-        val syntheticId = "await-$expectedType"
-        pendingReplies[syntheticId] = PendingReply(expectedType, deferred)
+        pendingReplies[requestId] = PendingReply(deferred)
         return try {
-            withTimeout(timeout) {
+            val sent = socket?.send(
+                json.encodeToString(
+                    BridgeEnvelope(
+                        type = type,
+                        requestId = requestId,
+                        payload = payload,
+                    )
+                )
+            ) ?: false
+            if (!sent) {
+                throw IllegalStateException("Not connected to your Mac bridge.")
+            }
+            withTimeout(20.seconds) {
                 deferred.await()
             }
         } finally {
-            pendingReplies.remove(syntheticId)
+            pendingReplies.remove(requestId)
         }
     }
 
@@ -401,12 +408,11 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
                 }
             }
         }
+    }
 
-        val matchingAwait = pendingReplies.entries.firstOrNull { (_, reply) -> reply.expectedType == message.type }
-        if (matchingAwait != null) {
-            pendingReplies.remove(matchingAwait.key)
-            matchingAwait.value.deferred.complete(payload)
-        }
+    private fun failPendingReplies(error: Throwable) {
+        pendingReplies.values.forEach { reply -> reply.deferred.completeExceptionally(error) }
+        pendingReplies.clear()
     }
 
     private fun decodeThreadList(payload: JsonObject?): List<ThreadSummary> {
@@ -462,7 +468,7 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
     private fun requestBootstrapData() {
         scope.launch {
             runCatching {
-                sendForReply("workspace.list", buildJsonObject {}, "workspace.list")
+                sendForReply("workspace.list", buildJsonObject {})
                 requestThreadList()
             }.onFailure(::publishError)
         }
@@ -535,16 +541,6 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
         }
     }
 
-    private fun JsonObject?.toRuntimeState(): RuntimeState {
-        return when (this?.string("state")) {
-            "starting" -> RuntimeState.STARTING
-            "ready" -> RuntimeState.READY
-            "busy" -> RuntimeState.BUSY
-            "error" -> RuntimeState.ERROR
-            else -> RuntimeState.OFFLINE
-        }
-    }
-
     private companion object {
         val ED25519_SPKI_PREFIX = byteArrayOf(
             0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
@@ -553,9 +549,18 @@ class BridgeRepository(private val deviceStore: DeviceStore) {
     }
 
     private data class PendingReply(
-        val expectedType: String,
         val deferred: CompletableDeferred<JsonObject?>,
     )
+}
+
+private fun JsonObject?.runtimeState(): RuntimeState {
+    return when (this?.string("state")) {
+        "starting" -> RuntimeState.STARTING
+        "ready" -> RuntimeState.READY
+        "busy" -> RuntimeState.BUSY
+        "error" -> RuntimeState.ERROR
+        else -> RuntimeState.OFFLINE
+    }
 }
 
 private fun ByteArray.encodeBase64(): String = java.util.Base64.getEncoder().encodeToString(this)

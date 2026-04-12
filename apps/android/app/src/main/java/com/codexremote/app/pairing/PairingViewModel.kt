@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
+private val pairingJson = Json { ignoreUnknownKeys = true }
+
 class PairingViewModel(
     private val deviceStore: DeviceStore,
     private val repository: BridgeRepository,
@@ -25,8 +27,6 @@ class PairingViewModel(
 
     var pairingError by mutableStateOf<String?>(null)
         private set
-
-    private val json = Json { ignoreUnknownKeys = true }
 
     init {
         viewModelScope.launch {
@@ -75,20 +75,18 @@ class PairingViewModel(
         } else {
             normalized
         }
-        return json.decodeFromString<PairingQrPayload>(jsonPayload)
-    }
-
-    private fun decodeBase64Payload(value: String): String {
-        val trimmed = value.trim()
-        val urlSafe = trimmed.padEnd(((trimmed.length + 3) / 4) * 4, '=')
-        return runCatching {
-            String(Base64.getUrlDecoder().decode(urlSafe))
-        }.getOrElse {
-            String(Base64.getDecoder().decode(urlSafe))
-        }
-    }
-
-    private companion object {
-        const val BASE64_PREFIX = "base64:"
+        return pairingJson.decodeFromString<PairingQrPayload>(jsonPayload)
     }
 }
+
+private fun decodeBase64Payload(value: String): String {
+    val trimmed = value.trim()
+    val urlSafe = trimmed.padEnd(((trimmed.length + 3) / 4) * 4, '=')
+    return runCatching {
+        String(Base64.getUrlDecoder().decode(urlSafe))
+    }.getOrElse {
+        String(Base64.getDecoder().decode(urlSafe))
+    }
+}
+
+private const val BASE64_PREFIX = "base64:"

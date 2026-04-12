@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import os from "node:os";
 import {
   authResponsePayloadSchema,
@@ -34,12 +34,34 @@ type ClientState = {
   authenticatedDeviceId: string | null;
 };
 
+type RuntimeState = "starting" | "ready" | "busy" | "error";
+
 export class BridgeServer {
   private readonly httpServer = createServer();
   private readonly wsServer = new WebSocketServer({ server: this.httpServer });
   private readonly clients = new Set<ClientState>();
   private readonly pairingService: PairingService;
   private readonly sessionIndex = new SessionIndex();
+  private started = false;
+  private runtimeState: RuntimeState = "starting";
+  private readonly handleRuntimeState = (state: RuntimeState) => {
+    this.runtimeState = state;
+    this.broadcast("runtime.status", { state } satisfies RuntimeStatusPayload);
+  };
+  private readonly handleNotification = (notification: { method: string; params?: unknown }) => {
+    this.handleCodexNotification(notification);
+  };
+  private readonly handleStderr = (stderr: string) => log("warn", "codex app-server stderr", { stderr });
+  private readonly handleRequest = (request: IncomingMessage, response: ServerResponse) => {
+    if (request.method === "GET" && request.url === "/healthz") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(this.getHealthSnapshot()));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "not_found" }));
+  };
 
   constructor(
     private readonly config: BridgeConfig,
@@ -50,11 +72,14 @@ export class BridgeServer {
   }
 
   async start(): Promise<void> {
-    this.codexClient.on("runtimeState", (state) => {
-      this.broadcast("runtime.status", { state } satisfies RuntimeStatusPayload);
-    });
-    this.codexClient.on("notification", (notification) => this.handleCodexNotification(notification));
-    this.codexClient.on("stderr", (stderr) => log("warn", "codex app-server stderr", { stderr }));
+    if (this.started) {
+      return;
+    }
+    this.started = true;
+    this.httpServer.on("request", this.handleRequest);
+    this.codexClient.on("runtimeState", this.handleRuntimeState);
+    this.codexClient.on("notification", this.handleNotification);
+    this.codexClient.on("stderr", this.handleStderr);
 
     this.wsServer.on("connection", (socket) => {
       const client: ClientState = { socket, authenticatedDeviceId: null };
@@ -106,6 +131,42 @@ export class BridgeServer {
     qrcode.default.generate(JSON.stringify(pairingPayload), { small: true });
   }
 
+  stop(): void {
+    if (!this.started) {
+      return;
+    }
+    this.started = false;
+    this.httpServer.off("request", this.handleRequest);
+    this.codexClient.off("runtimeState", this.handleRuntimeState);
+    this.codexClient.off("notification", this.handleNotification);
+    this.codexClient.off("stderr", this.handleStderr);
+
+    for (const client of this.clients) {
+      client.socket.removeAllListeners();
+      client.socket.close(1001, "bridge shutting down");
+    }
+    this.clients.clear();
+
+    this.wsServer.close();
+    this.httpServer.close();
+  }
+
+  getHealthSnapshot(): {
+    started: boolean;
+    runtimeState: RuntimeState;
+    connectedClients: number;
+    allowedWorkspaces: number;
+    authenticatedClients: number;
+  } {
+    return {
+      started: this.started,
+      runtimeState: this.runtimeState,
+      connectedClients: this.clients.size,
+      allowedWorkspaces: this.config.allowedWorkspaces.length,
+      authenticatedClients: [...this.clients].filter((client) => client.authenticatedDeviceId !== null).length,
+    };
+  }
+
   private async handleClientMessage(client: ClientState, raw: string): Promise<void> {
     const message = bridgeMessageSchema.parse(JSON.parse(raw));
 
@@ -149,7 +210,7 @@ export class BridgeServer {
     if (message.type === "thread.list") {
       const threads = await this.codexClient.listThreads();
       const codexThreads = this.sessionIndex.hydrateFromCodexThreads(threads, this.config.allowedWorkspaces);
-      const fallback = threads.length === 0
+      const fallback = threads.length === 0 && this.config.allowedWorkspaces.length === 1
         ? this.sessionIndex.readThreadSummaries(this.config.allowedWorkspaces)
         : [];
       const merged = dedupeThreadSummaries([...codexThreads, ...fallback]).slice(0, 50);
@@ -169,14 +230,22 @@ export class BridgeServer {
     if (message.type === "thread.get") {
       const payload = threadGetPayloadSchema.parse(message.payload);
       const thread = await this.codexClient.readThread(payload.threadId);
+      const detail = this.sessionIndex.toThreadDetail(thread, this.config.allowedWorkspaces);
+      if (!detail) {
+        throw new Error("Thread is outside the configured workspaces.");
+      }
       this.reply(client.socket, message, "thread.get", {
-        thread: this.sessionIndex.toThreadDetail(thread, this.config.allowedWorkspaces),
+        thread: detail,
       });
       return;
     }
 
     if (message.type === "thread.send") {
       const payload = threadSendPayloadSchema.parse(message.payload);
+      const thread = await this.codexClient.readThread(payload.threadId);
+      if (!this.sessionIndex.toThreadDetail(thread, this.config.allowedWorkspaces)) {
+        throw new Error("Thread is outside the configured workspaces.");
+      }
       await this.codexClient.sendMessage(payload.threadId, payload.message);
       this.reply(client.socket, message, "thread.send", { accepted: true, threadId: payload.threadId });
       return;
@@ -184,6 +253,10 @@ export class BridgeServer {
 
     if (message.type === "thread.open_in_codex_app") {
       const payload = threadOpenPayloadSchema.parse(message.payload);
+      const thread = await this.codexClient.readThread(payload.threadId);
+      if (!this.sessionIndex.toThreadDetail(thread, this.config.allowedWorkspaces)) {
+        throw new Error("Thread is outside the configured workspaces.");
+      }
       await openThreadInDesktopApp(payload.threadId);
       this.reply(client.socket, message, "thread.open_in_codex_app", {
         opened: true,

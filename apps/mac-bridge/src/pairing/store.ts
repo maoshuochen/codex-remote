@@ -48,6 +48,9 @@ export class TrustStore {
 
   private write(data: TrustStoreData): void {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), "utf8");
+    const directory = path.dirname(this.filePath);
+    const tempPath = path.join(directory, `${path.basename(this.filePath)}.${process.pid}.tmp`);
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf8");
+    fs.renameSync(tempPath, this.filePath);
   }
 }

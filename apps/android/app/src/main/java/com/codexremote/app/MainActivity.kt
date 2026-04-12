@@ -8,7 +8,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.codexremote.app.data.DeviceStore
 import com.codexremote.app.network.BridgeRepository
 import com.codexremote.app.pairing.PairingViewModel
@@ -24,12 +27,11 @@ class MainActivity : ComponentActivity() {
             CodexRemoteTheme {
                 val deviceStore = remember { DeviceStore(applicationContext) }
                 val repository = remember { BridgeRepository(deviceStore) }
-                val pairingViewModel = remember(deviceStore, repository) {
-                    PairingViewModel(deviceStore, repository)
+                val factory = remember(deviceStore, repository) {
+                    AppViewModelFactory(deviceStore, repository)
                 }
-                val threadsViewModel = remember(repository) {
-                    ThreadsViewModel(repository)
-                }
+                val pairingViewModel: PairingViewModel = viewModel(factory = factory)
+                val threadsViewModel: ThreadsViewModel = viewModel(factory = factory)
                 val lifecycleOwner = LocalLifecycleOwner.current
                 LaunchedEffect(pairingPayload) {
                     if (!pairingPayload.isNullOrBlank()) {
@@ -47,6 +49,11 @@ class MainActivity : ComponentActivity() {
                         lifecycleOwner.lifecycle.removeObserver(observer)
                     }
                 }
+                DisposableEffect(repository) {
+                    onDispose {
+                        repository.close()
+                    }
+                }
                 RootScreen(
                     pairingViewModel = pairingViewModel,
                     threadsViewModel = threadsViewModel,
@@ -57,5 +64,23 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val EXTRA_PAIRING_PAYLOAD = "pairing_payload"
+    }
+}
+
+private class AppViewModelFactory(
+    private val deviceStore: DeviceStore,
+    private val repository: BridgeRepository,
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return when {
+            modelClass.isAssignableFrom(PairingViewModel::class.java) -> {
+                PairingViewModel(deviceStore, repository)
+            }
+            modelClass.isAssignableFrom(ThreadsViewModel::class.java) -> {
+                ThreadsViewModel(repository)
+            }
+            else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+        } as T
     }
 }

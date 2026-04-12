@@ -10,6 +10,10 @@ export class CodexAppServerClient extends EventEmitter {
   private process: ReturnType<typeof spawn> | null = null;
   private readonly rpc = new JsonRpcClient();
   private state: RuntimeState = "starting";
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopping = false;
+  private startGeneration = 0;
+  private started = false;
 
   constructor(private readonly listenPort: number) {
     super();
@@ -20,27 +24,38 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    if (this.started) {
+      return;
+    }
+    this.started = true;
+    this.stopping = false;
+    this.startGeneration += 1;
+    const generation = this.startGeneration;
+    this.clearRestartTimer();
+    this.cleanupRuntime();
+
     this.state = "starting";
     this.emit("runtimeState", this.state);
 
-    this.process = spawn(
-      "codex",
-      ["app-server", "--listen", `ws://127.0.0.1:${this.listenPort}`],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    this.process = spawn("codex", ["app-server", "--listen", `ws://127.0.0.1:${this.listenPort}`], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     this.process.stderr?.on("data", (chunk) => {
       this.emit("stderr", chunk.toString());
     });
 
+    this.process.once("error", (error) => {
+      this.state = "error";
+      this.emit("runtimeState", this.state);
+      this.emit("stderr", `failed to start codex app-server: ${error.message}`);
+      this.scheduleRestart(generation);
+    });
+
     this.process.once("exit", () => {
       this.state = "error";
       this.emit("runtimeState", this.state);
-      setTimeout(() => {
-        void this.start();
-      }, 2000);
+      this.scheduleRestart(generation);
     });
 
     await waitForServerBoot(this.listenPort);
@@ -49,6 +64,7 @@ export class CodexAppServerClient extends EventEmitter {
     this.rpc.on("close", () => {
       this.state = "error";
       this.emit("runtimeState", this.state);
+      this.scheduleRestart(generation);
     });
 
     await this.rpc.request("initialize", {
@@ -63,6 +79,18 @@ export class CodexAppServerClient extends EventEmitter {
     });
     this.rpc.notify("initialized");
     this.state = "ready";
+    this.emit("runtimeState", this.state);
+  }
+
+  stop(): void {
+    if (!this.started) {
+      return;
+    }
+    this.started = false;
+    this.stopping = true;
+    this.clearRestartTimer();
+    this.cleanupRuntime();
+    this.state = "error";
     this.emit("runtimeState", this.state);
   }
 
@@ -121,6 +149,39 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     this.emit("notification", notification);
+  }
+
+  private scheduleRestart(generation: number): void {
+    if (this.stopping || generation !== this.startGeneration) {
+      return;
+    }
+
+    this.clearRestartTimer();
+    this.cleanupRuntime();
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (this.stopping || generation !== this.startGeneration) {
+        return;
+      }
+      this.started = false;
+      void this.start();
+    }, 2000);
+  }
+
+  private cleanupRuntime(): void {
+    if (this.process) {
+      this.process.removeAllListeners();
+      this.process = null;
+    }
+    this.rpc.removeAllListeners();
+    this.rpc.close();
+  }
+
+  private clearRestartTimer(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
   }
 }
 

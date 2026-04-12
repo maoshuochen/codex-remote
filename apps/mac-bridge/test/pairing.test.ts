@@ -62,3 +62,26 @@ test("pairing service rejects expired tokens", () => {
     }),
   );
 });
+
+test("pairing service rejects invalid challenge signatures", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-pairing-"));
+  const config = testConfig(root);
+  const identity = ensureBridgeIdentity(config.bridgePrivateKeyPath);
+  const service = new PairingService(config, identity);
+  const { publicKey } = crypto.generateKeyPairSync("ed25519");
+  const qr = service.issuePairingQr("ws://127.0.0.1:8787", "pair-token");
+
+  service.acceptPairRequest({
+    pairingToken: qr.pairingToken,
+    deviceId: "device-1",
+    deviceName: "Pixel",
+    publicKey: publicKey.export({ format: "pem", type: "spki" }).toString(),
+  });
+
+  const challenge = service.createChallenge();
+
+  assert.equal(
+    service.verifyChallengeResponse("device-1", challenge.challengeId, Buffer.from("invalid-signature").toString("base64")),
+    false,
+  );
+});

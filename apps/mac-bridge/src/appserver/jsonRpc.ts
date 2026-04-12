@@ -64,8 +64,13 @@ export class JsonRpcClient extends EventEmitter {
   }
 
   close(): void {
+    this.socket?.removeAllListeners();
     this.socket?.close();
     this.socket = null;
+    for (const pending of this.pending.values()) {
+      pending.reject(new Error("JSON-RPC socket was closed."));
+    }
+    this.pending.clear();
   }
 
   private handleMessage(raw: string): void {

@@ -16,6 +16,19 @@
 - Stream agent output to the phone over WebSocket
 - Restrict writable workspaces to a configured allowlist
 
+## Trust model
+
+- The bridge assumes the LAN or Tailscale link is already trusted.
+- The Android device is trusted only after QR pairing and challenge verification.
+- The bridge only accepts threads rooted inside configured workspaces.
+- The Android device keeps its pairing secret in Android Keystore-backed storage.
+
+## Failure recovery
+
+- If the bridge reports startup or runtime errors, restart `codex app-server` and re-pair if the trust store was cleared.
+- If the phone shows stale thread data, refresh the thread list or reconnect the device.
+- If a pairing token expires, generate a new QR payload from the bridge terminal.
+
 ## Quick start
 
 ### 1. Install dependencies
@@ -70,7 +83,19 @@ Key event types:
 
 ## Android project
 
-The Android app is scaffolded as a standalone Gradle project under `apps/android`. This machine does not currently have a Java runtime or Android SDK, so the Android code was created and aligned to the protocol, but not compiled locally.
+The Android app is scaffolded as a standalone Gradle project under `apps/android`. It uses Java 17 and the Android SDK, and the local unit tests can be run with `cd apps/android && ./gradlew test`.
+
+## Testing notes
+
+- `npm test` covers the mac bridge config, pairing, session indexing, and bridge access control checks.
+- `npm run build` compiles the TypeScript workspace.
+- `npm run verify` runs the test suite followed by a workspace build.
+- `npm run verify:android` runs the Android unit tests.
+- `npm run verify:all` runs both the workspace verification and the Android unit tests.
+- GitHub Actions runs `npm run verify` on push and pull request.
+- GitHub Actions also runs `cd apps/android && ./gradlew test` for Android unit tests.
+- `GET /healthz` on the bridge reports the current runtime snapshot for quick checks.
+- Android Gradle verification requires Java 17 and an installed Android SDK.
 
 ## Verification completed
 
