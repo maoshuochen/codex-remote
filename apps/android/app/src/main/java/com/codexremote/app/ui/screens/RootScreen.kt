@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,12 +38,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.codexremote.app.data.ConnectionPhase
 import com.codexremote.app.data.RootDestination
 import com.codexremote.app.data.RuntimeState
 import com.codexremote.app.data.ThreadDetail
+import com.codexremote.app.data.ThreadMessage
 import com.codexremote.app.data.ThreadSummary
 import com.codexremote.app.data.WorkspaceSummary
 import com.codexremote.app.pairing.PairingViewModel
@@ -341,18 +344,7 @@ private fun ThreadDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(thread.messages) { message ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(message.role.replaceFirstChar(Char::titlecase), fontWeight = FontWeight.SemiBold)
-                            Text(message.text.ifBlank { "(empty message)" })
-                            message.createdAt?.let { createdAt ->
-                                Text(
-                                    text = formatMessageCreatedAt(createdAt),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
+                    MessageBubble(message = message)
                 }
             }
         }
@@ -487,6 +479,47 @@ private fun EmptyStateCard(
 }
 
 @Composable
+private fun MessageBubble(message: ThreadMessage) {
+    val role = message.role.trim().lowercase()
+    val bubble = messageBubbleSpec(role)
+    val alignment = when (role) {
+        "user" -> Alignment.End
+        "assistant" -> Alignment.Start
+        else -> Alignment.CenterHorizontally
+    }
+    val widthFraction = when (role) {
+        "system" -> 0.92f
+        else -> 0.88f
+    }
+    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
+        Card(
+            modifier = Modifier.fillMaxWidth(widthFraction),
+            colors = CardDefaults.cardColors(containerColor = bubble.containerColor),
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    bubble.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = bubble.titleColor,
+                )
+                Text(message.text.ifBlank { "(empty message)" })
+                message.createdAt?.let { createdAt ->
+                    Text(
+                        text = formatMessageCreatedAt(createdAt),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun QuickActionCard(
     title: String,
     message: String,
@@ -501,6 +534,38 @@ private fun QuickActionCard(
                 Text(actionText)
             }
         }
+    }
+}
+
+private data class MessageBubbleSpec(
+    val title: String,
+    val titleColor: Color,
+    val containerColor: Color,
+)
+
+@Composable
+private fun messageBubbleSpec(role: String): MessageBubbleSpec {
+    return when (role) {
+        "user" -> MessageBubbleSpec(
+            title = "You",
+            titleColor = MaterialTheme.colorScheme.primary,
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        )
+        "assistant" -> MessageBubbleSpec(
+            title = "Codex",
+            titleColor = MaterialTheme.colorScheme.secondary,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        )
+        "system" -> MessageBubbleSpec(
+            title = "System",
+            titleColor = MaterialTheme.colorScheme.tertiary,
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        )
+        else -> MessageBubbleSpec(
+            title = role.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() },
+            titleColor = MaterialTheme.colorScheme.onSurface,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
     }
 }
 
