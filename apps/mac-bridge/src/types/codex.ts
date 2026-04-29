@@ -26,6 +26,13 @@ export type JsonRpcNotification = {
   params?: unknown;
 };
 
+export type JsonRpcServerRequest = {
+  jsonrpc: "2.0";
+  id: string;
+  method: string;
+  params?: unknown;
+};
+
 export type CodexThread = {
   id: string;
   preview: string;

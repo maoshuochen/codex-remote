@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { once } from "node:events";
-import type { CodexThread, JsonRpcNotification } from "../types/codex.js";
+import type { CodexThread, JsonRpcNotification, JsonRpcServerRequest } from "../types/codex.js";
 import { JsonRpcClient } from "./jsonRpc.js";
 
 type RuntimeState = "starting" | "ready" | "busy" | "error";
@@ -61,6 +61,7 @@ export class CodexAppServerClient extends EventEmitter {
     await waitForServerBoot(this.listenPort);
     await this.rpc.connect(`ws://127.0.0.1:${this.listenPort}`);
     this.rpc.on("notification", (notification) => this.handleNotification(notification as JsonRpcNotification));
+    this.rpc.on("serverRequest", (request) => this.emit("serverRequest", request as JsonRpcServerRequest));
     this.rpc.on("close", () => {
       this.state = "error";
       this.emit("runtimeState", this.state);
@@ -136,6 +137,10 @@ export class CodexAppServerClient extends EventEmitter {
         },
       ],
     });
+  }
+
+  resolveServerRequest(requestId: string, result: unknown): void {
+    this.rpc.reply(requestId, result);
   }
 
   private handleNotification(notification: JsonRpcNotification): void {

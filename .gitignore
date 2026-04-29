@@ -1,12 +1,16 @@
 node_modules
 dist
 .env
+.env.*
+!.env.example
 .DS_Store
 artifacts
 *.log
+*.tmp
 apps/android/.gradle
 apps/android/build
 apps/android/app/build
 apps/android/local.properties
 apps/mac-bridge/data
+apps/web/dist
 coverage

@@ -27,11 +27,12 @@ export class PairingService {
     this.trustStore = new TrustStore(config.trustStorePath);
   }
 
-  issuePairingQr(bridgeUrl: string, pairingToken: string): PairingQrPayload {
+  issuePairingQr(bridgeUrl: string, webUrl: string, pairingToken: string): PairingQrPayload {
     const expiresAt = Date.now() + this.config.pairingTtlSeconds * 1000;
     this.currentPairingToken = { value: pairingToken, expiresAt };
     return {
       bridgeUrl,
+      webUrl,
       deviceName: this.config.deviceName,
       pairingToken,
       expiresAt: new Date(expiresAt).toISOString(),

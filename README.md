@@ -1,22 +1,16 @@
 # Codex Remote MVP
 
-`Codex Remote` is a local-first companion for controlling Codex running on a Mac from an Android device over a trusted LAN or Tailscale connection.
+`Codex Remote` is a local-first web control surface for Codex running on a trusted Mac over LAN or Tailscale.
 
 ## Product perspective
 
-This is a phone companion for Codex on macOS, not a general remote desktop app.
+This is a browser/PWA companion for Codex on macOS, not a general remote desktop app.
 
 ### Product positioning
 
-- A phone-first way to check status, open threads, and send follow-ups.
-- A simple bridge between one trusted Android device and one trusted Mac runtime.
-- A narrow remote workflow for chat, thread review, and handoff back to `Codex.app`.
-
-### Primary users
-
-- Developers who want to keep using Codex while away from their Mac.
-- People who want to start, continue, or triage chats from their phone.
-- Early adopters who are comfortable with a local trust model.
+- A lightweight way to check status, open threads, resolve approvals, and send follow-ups from any trusted browser.
+- A simple bridge between trusted web clients and one trusted Mac runtime.
+- A narrow remote workflow for chat, thread review, approvals, and handoff back to `Codex.app`.
 
 ### Core user jobs
 
@@ -24,29 +18,23 @@ This is a phone companion for Codex on macOS, not a general remote desktop app.
 - Create a new chat.
 - Review existing threads.
 - Send a follow-up message.
+- Resolve Codex approval requests.
 - Open a thread in `Codex.app` when needed.
-
-### Product value
-
-- Cuts down context switching.
-- Keeps control local and explicit.
-- Preserves workspace boundaries.
-- Makes Codex useful when the laptop is not nearby.
 
 ### Product principles
 
 - The Mac stays in charge.
 - Pairing is intentional and one-time.
-- The app controls Codex sessions, not the full desktop.
+- The browser controls Codex sessions, not the full desktop.
 - Writable access stays limited to allowed workspaces.
 
 ### Typical flow
 
 1. Start the bridge on the Mac and wait for it to be ready.
-2. Scan the one-time QR code from the Android app to pair the device.
-3. Open the home screen to view status and chats.
-4. Create a new chat or open an existing thread.
-5. Send a follow-up message or hand off to `Codex.app`.
+2. Open the printed web URL from a trusted browser.
+3. Paste the one-time pairing token or the full pairing payload.
+4. View threads, create chats, send follow-ups, and resolve approvals.
+5. Hand off to `Codex.app` when the desktop experience is needed.
 
 ### Non-goals
 
@@ -58,29 +46,24 @@ This is a phone companion for Codex on macOS, not a general remote desktop app.
 ## What is included
 
 - `apps/mac-bridge`: macOS bridge written in TypeScript
-- `apps/android`: Android client scaffold with Compose UI, pairing, thread list, and chat screen structure
+- `apps/web`: React/Vite web client served by the bridge or run standalone during development
 - `packages/protocol`: shared bridge protocol schema and types
 
 ## MVP boundaries
 
 - Remote control the Codex runtime, not the desktop UI
 - Open a thread in `Codex.app` using `codex://threads/<threadId>`
-- Pair a trusted Android device using a one-time QR token
-- Stream agent output to the phone over WebSocket
+- Pair a trusted browser using a one-time token
+- Stream agent output to the browser over WebSocket
 - Restrict writable workspaces to a configured allowlist
 
 ## Trust model
 
 - The bridge assumes the LAN or Tailscale link is already trusted.
-- The Android device is trusted only after QR pairing and challenge verification.
+- A browser is trusted only after pairing and challenge verification.
 - The bridge only accepts threads rooted inside configured workspaces.
-- The Android device keeps its pairing secret in Android Keystore-backed storage.
-
-## Failure recovery
-
-- If the bridge reports startup or runtime errors, restart `codex app-server` and re-pair if the trust store was cleared.
-- If the phone shows stale thread data, refresh the thread list or reconnect the device.
-- If a pairing token expires, generate a new QR payload from the bridge terminal.
+- The browser stores its pairing key locally for reconnects.
+- WebSocket origins are limited to localhost, the advertised bridge host, and optional configured origins.
 
 ## Quick start
 
@@ -96,9 +79,21 @@ npm install
 cp .env.example .env
 ```
 
-Set `CODEX_REMOTE_ALLOWED_WORKSPACES` to one or more absolute directories separated by commas.
+Set `CODEX_REMOTE_ALLOWED_WORKSPACES` to one or more absolute directories separated by commas. If you point it at a parent code directory, the bridge will expand immediate git repositories under it into separate workspaces.
 
-### 3. Run the bridge
+Useful web settings:
+
+- `CODEX_REMOTE_ADVERTISED_HOST`: override the host printed in pairing URLs.
+- `CODEX_REMOTE_ALLOWED_ORIGINS`: comma-separated browser origins that may open WebSocket connections.
+- `CODEX_REMOTE_WEB_DIST_DIR`: directory containing the built web client.
+
+### 3. Build the web client
+
+```sh
+npm run build:web
+```
+
+### 4. Run the bridge
 
 ```sh
 npm run dev:bridge
@@ -107,8 +102,15 @@ npm run dev:bridge
 The bridge will:
 
 - start `codex app-server` on a loopback WebSocket
-- print a QR payload in the terminal
-- accept Android client pairing and reconnects
+- serve the web client from `apps/web/dist`
+- print a pairing payload in the terminal
+- accept paired browser reconnects
+
+For web UI development without rebuilding the bridge-served bundle:
+
+```sh
+npm run dev:web
+```
 
 ## Bridge protocol
 
@@ -124,34 +126,30 @@ Key request types:
 - `thread.get`
 - `thread.send`
 - `thread.open_in_codex_app`
+- `approval.list`
+- `approval.resolve`
 
 Key event types:
 
 - `pair.confirm`
 - `auth.challenge`
+- `approval.requested`
+- `approval.resolved`
 - `thread.stream.delta`
 - `thread.stream.done`
 - `thread.stream.error`
 - `runtime.status`
 
-## Android project
-
-The Android app is scaffolded as a standalone Gradle project under `apps/android`. It uses Java 17 and the Android SDK, and the local unit tests can be run with `cd apps/android && ./gradlew test`.
-
 ## Testing notes
 
-- `npm test` covers the mac bridge config, pairing, session indexing, and bridge access control checks.
-- `npm run build` compiles the TypeScript workspace.
+- `npm test` covers protocol, bridge config, pairing, session indexing, approvals, and bridge access control checks.
+- `npm run build` compiles all TypeScript workspaces and builds the web client.
 - `npm run verify` runs the test suite followed by a workspace build.
-- `npm run verify:android` runs the Android unit tests.
-- `npm run verify:all` runs both the workspace verification and the Android unit tests.
+- `npm run verify:web` type-checks and builds the web client.
 - GitHub Actions runs `npm run verify` on push and pull request.
-- GitHub Actions also runs `cd apps/android && ./gradlew test` for Android unit tests.
 - `GET /healthz` on the bridge reports the current runtime snapshot for quick checks.
-- Android Gradle verification requires Java 17 and an installed Android SDK.
 
 ## Verification completed
 
-- `codex-cli 0.120.0` is available locally
-- `codex app-server --help` confirms WebSocket transport support
-- TypeScript workspace builds and bridge tests are expected to run after `npm install`
+- `codex app-server --help` confirms WebSocket transport support.
+- TypeScript workspace builds and bridge tests are expected to run after `npm install`.

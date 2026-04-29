@@ -9,9 +9,11 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "dev:bridge": "npm run dev --workspace @codex-remote/mac-bridge",
+    "dev:web": "npm run dev --workspace @codex-remote/web",
+    "build:web": "npm run build --workspace @codex-remote/web",
     "test": "npm run test --workspaces --if-present",
     "verify": "npm run test && npm run build",
-    "verify:android": "cd apps/android && ./gradlew test",
-    "verify:all": "npm run verify && npm run verify:android"
+    "verify:web": "npm run test --workspace @codex-remote/web && npm run build --workspace @codex-remote/web",
+    "verify:all": "npm run verify"
   }
 }

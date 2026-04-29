@@ -1,7 +1,15 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import os from "node:os";
+import path from "node:path";
 import {
+  approvalListResponsePayloadSchema,
+  approvalRequestSchema,
+  approvalResolvePayloadSchema,
+  approvalResolveResponsePayloadSchema,
+  approvalResolvedPayloadSchema,
+  approvalRequestedPayloadSchema,
   authResponsePayloadSchema,
   bridgeMessageSchema,
   errorPayloadSchema,
@@ -16,6 +24,8 @@ import {
   threadStreamErrorPayloadSchema,
   workspaceListResponsePayloadSchema,
   type BridgeMessage,
+  type ApprovalKind,
+  type ApprovalRequest,
   type RuntimeStatusPayload,
   type ThreadSummary,
 } from "@codex-remote/protocol";
@@ -28,6 +38,7 @@ import { log } from "./logger.js";
 import { PairingService } from "./pairing/service.js";
 import { SessionIndex } from "./sessions/index.js";
 import { CodexAppServerClient } from "./appserver/client.js";
+import type { JsonRpcServerRequest } from "./types/codex.js";
 
 type ClientState = {
   socket: WebSocket;
@@ -36,10 +47,15 @@ type ClientState = {
 
 type RuntimeState = "starting" | "ready" | "busy" | "error";
 
+type PendingApproval = ApprovalRequest & {
+  rawRequestId: string;
+};
+
 export class BridgeServer {
   private readonly httpServer = createServer();
-  private readonly wsServer = new WebSocketServer({ server: this.httpServer });
+  private readonly wsServer: WebSocketServer;
   private readonly clients = new Set<ClientState>();
+  private readonly pendingApprovals = new Map<string, PendingApproval>();
   private readonly pairingService: PairingService;
   private readonly sessionIndex = new SessionIndex();
   private started = false;
@@ -51,11 +67,19 @@ export class BridgeServer {
   private readonly handleNotification = (notification: { method: string; params?: unknown }) => {
     this.handleCodexNotification(notification);
   };
+  private readonly handleServerRequest = (request: JsonRpcServerRequest) => {
+    this.handleCodexServerRequest(request);
+  };
   private readonly handleStderr = (stderr: string) => log("warn", "codex app-server stderr", { stderr });
   private readonly handleRequest = (request: IncomingMessage, response: ServerResponse) => {
     if (request.method === "GET" && request.url === "/healthz") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(this.getHealthSnapshot()));
+      return;
+    }
+
+    if (request.method === "GET" || request.method === "HEAD") {
+      this.serveWebAsset(request, response);
       return;
     }
 
@@ -68,6 +92,10 @@ export class BridgeServer {
     private readonly identity: BridgeIdentity,
     private readonly codexClient: CodexAppServerClient,
   ) {
+    this.wsServer = new WebSocketServer({
+      server: this.httpServer,
+      verifyClient: ({ origin }, done) => done(this.isAllowedOrigin(origin)),
+    });
     this.pairingService = new PairingService(config, identity);
   }
 
@@ -79,6 +107,7 @@ export class BridgeServer {
     this.httpServer.on("request", this.handleRequest);
     this.codexClient.on("runtimeState", this.handleRuntimeState);
     this.codexClient.on("notification", this.handleNotification);
+    this.codexClient.on("serverRequest", this.handleServerRequest);
     this.codexClient.on("stderr", this.handleStderr);
 
     this.wsServer.on("connection", (socket) => {
@@ -119,11 +148,14 @@ export class BridgeServer {
       this.httpServer.listen(this.config.port, this.config.host, () => resolve());
     });
 
-    const bridgeUrl = `ws://${resolveAdvertisedHost(this.config.host)}:${this.config.port}`;
-    const pairingPayload = this.pairingService.issuePairingQr(bridgeUrl, createPairingToken());
+    const advertisedHost = this.config.advertisedHost ?? resolveAdvertisedHost(this.config.host);
+    const bridgeUrl = `ws://${advertisedHost}:${this.config.port}`;
+    const webUrl = `http://${advertisedHost}:${this.config.port}`;
+    const pairingPayload = this.pairingService.issuePairingQr(bridgeUrl, webUrl, createPairingToken());
     log("info", "bridge server listening", {
       host: this.config.host,
       port: this.config.port,
+      webUrl,
       pairingPayload,
     });
 
@@ -139,6 +171,7 @@ export class BridgeServer {
     this.httpServer.off("request", this.handleRequest);
     this.codexClient.off("runtimeState", this.handleRuntimeState);
     this.codexClient.off("notification", this.handleNotification);
+    this.codexClient.off("serverRequest", this.handleServerRequest);
     this.codexClient.off("stderr", this.handleStderr);
 
     for (const client of this.clients) {
@@ -265,7 +298,45 @@ export class BridgeServer {
       return;
     }
 
+    if (message.type === "approval.list") {
+      this.reply(client.socket, message, "approval.list", approvalListResponsePayloadSchema.parse({
+        approvals: this.visibleApprovals(),
+      }));
+      return;
+    }
+
+    if (message.type === "approval.resolve") {
+      const payload = approvalResolvePayloadSchema.parse(message.payload);
+      const approval = this.pendingApprovals.get(payload.approvalId);
+      if (!approval) {
+        throw new Error("Approval request is no longer pending.");
+      }
+      this.pendingApprovals.delete(payload.approvalId);
+      this.codexClient.resolveServerRequest(approval.rawRequestId, payload.result);
+      const resolved = approvalResolvedPayloadSchema.parse({ approvalId: payload.approvalId });
+      this.broadcast("approval.resolved", resolved);
+      this.reply(client.socket, message, "approval.resolve", approvalResolveResponsePayloadSchema.parse({
+        resolved: true,
+        approvalId: payload.approvalId,
+      }));
+      return;
+    }
+
     throw new Error(`Unsupported message type: ${message.type}`);
+  }
+
+  private handleCodexServerRequest(request: JsonRpcServerRequest): void {
+    if (!isApprovalMethod(request.method)) {
+      log("warn", "unsupported codex server request", { method: request.method });
+      this.codexClient.resolveServerRequest(request.id, { error: "unsupported_request" });
+      return;
+    }
+
+    const approval = toPendingApproval(request);
+    this.pendingApprovals.set(approval.approvalId, approval);
+    this.broadcast("approval.requested", approvalRequestedPayloadSchema.parse({
+      approval: this.toVisibleApproval(approval),
+    }));
   }
 
   private handleCodexNotification(notification: { method: string; params?: unknown }): void {
@@ -317,9 +388,66 @@ export class BridgeServer {
     }
   }
 
+  private visibleApprovals(): ApprovalRequest[] {
+    return [...this.pendingApprovals.values()].map((approval) => this.toVisibleApproval(approval));
+  }
+
+  private toVisibleApproval(approval: PendingApproval): ApprovalRequest {
+    const { rawRequestId: _rawRequestId, ...visible } = approval;
+    return approvalRequestSchema.parse(visible);
+  }
+
   private assertAuthenticated(client: ClientState): void {
     if (!client.authenticatedDeviceId) {
       throw new Error("Client is not authenticated.");
+    }
+  }
+
+  private serveWebAsset(request: IncomingMessage, response: ServerResponse): void {
+    const requestUrl = new URL(request.url ?? "/", "http://bridge.local");
+    const pathname = decodeURIComponent(requestUrl.pathname);
+    const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+    const candidate = path.resolve(this.config.webDistDir, relativePath);
+    const root = path.resolve(this.config.webDistDir);
+    const assetPath = candidate.startsWith(root + path.sep) || candidate === root ? candidate : path.join(root, "index.html");
+    const filePath = fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()
+      ? assetPath
+      : path.join(root, "index.html");
+
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "web_dist_not_found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": contentTypeFor(filePath) });
+    if (request.method === "HEAD") {
+      response.end();
+      return;
+    }
+    response.end(fs.readFileSync(filePath));
+  }
+
+  private isAllowedOrigin(origin: string | undefined): boolean {
+    if (!origin) {
+      return true;
+    }
+    if (this.config.allowedOrigins.includes(origin)) {
+      return true;
+    }
+    try {
+      const parsed = new URL(origin);
+      const advertisedHost = this.config.advertisedHost ?? resolveAdvertisedHost(this.config.host);
+      const allowedHosts = new Set([
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        this.config.host,
+        advertisedHost,
+      ]);
+      return parsed.protocol === "http:" && parsed.port === String(this.config.port) && allowedHosts.has(parsed.hostname);
+    } catch {
+      return false;
     }
   }
 
@@ -330,6 +458,26 @@ export class BridgeServer {
     }
     return { workspaceId, root };
   }
+}
+
+function contentTypeFor(filePath: string): string {
+  const extension = path.extname(filePath);
+  if (extension === ".html") {
+    return "text/html; charset=utf-8";
+  }
+  if (extension === ".js") {
+    return "text/javascript; charset=utf-8";
+  }
+  if (extension === ".css") {
+    return "text/css; charset=utf-8";
+  }
+  if (extension === ".json") {
+    return "application/json; charset=utf-8";
+  }
+  if (extension === ".svg") {
+    return "image/svg+xml";
+  }
+  return "application/octet-stream";
 }
 
 function resolveAdvertisedHost(host: string): string {
@@ -360,4 +508,122 @@ function dedupeThreadSummaries(items: ThreadSummary[]): ThreadSummary[] {
     }
   }
   return [...byId.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function isApprovalMethod(method: string): boolean {
+  return [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+    "item/tool/requestUserInput",
+  ].includes(method);
+}
+
+function toPendingApproval(request: JsonRpcServerRequest): PendingApproval {
+  const params = asRecord(request.params);
+  const approvalId = crypto.randomUUID();
+  const visible = approvalRequestSchema.parse({
+    approvalId,
+    method: request.method,
+    kind: approvalKindForMethod(request.method),
+    threadId: stringField(params, "threadId"),
+    turnId: stringField(params, "turnId"),
+    itemId: stringField(params, "itemId"),
+    reason: stringField(params, "reason"),
+    summary: summarizeApproval(request.method, params),
+    choices: deriveApprovalChoices(request.method, params),
+    createdAt: new Date().toISOString(),
+    params,
+  });
+  return {
+    ...visible,
+    rawRequestId: request.id,
+  };
+}
+
+function approvalKindForMethod(method: string): ApprovalKind {
+  if (method === "item/commandExecution/requestApproval") {
+    return "command";
+  }
+  if (method === "item/fileChange/requestApproval") {
+    return "file_change";
+  }
+  if (method === "item/permissions/requestApproval") {
+    return "permission";
+  }
+  if (method === "item/tool/requestUserInput") {
+    return "user_input";
+  }
+  return "unknown";
+}
+
+function deriveApprovalChoices(method: string, params: Record<string, unknown>): string[] {
+  if (method === "item/commandExecution/requestApproval") {
+    const choices = arrayField(params, "availableDecisions").flatMap((item) => {
+      if (typeof item === "string") {
+        return [item];
+      }
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        return Object.keys(item);
+      }
+      return [];
+    });
+    return choices.length > 0 ? choices : ["accept", "acceptForSession", "decline", "cancel"];
+  }
+  if (method === "item/fileChange/requestApproval") {
+    return ["accept", "acceptForSession", "decline", "cancel"];
+  }
+  if (method === "item/permissions/requestApproval") {
+    return ["session", "turn", "decline"];
+  }
+  if (method === "item/tool/requestUserInput") {
+    return ["answer"];
+  }
+  return ["accept", "decline"];
+}
+
+function summarizeApproval(method: string, params: Record<string, unknown>): string {
+  if (method === "item/commandExecution/requestApproval") {
+    return stringField(params, "command") || "Command approval requested";
+  }
+  if (method === "item/fileChange/requestApproval") {
+    return stringField(params, "summary") || "File change approval requested";
+  }
+  if (method === "item/permissions/requestApproval") {
+    return stringField(params, "reason") || "Additional permissions requested";
+  }
+  if (method === "item/tool/requestUserInput") {
+    return firstQuestionPrompt(params) || "Codex is waiting for input";
+  }
+  return method;
+}
+
+function firstQuestionPrompt(params: Record<string, unknown>): string {
+  for (const item of arrayField(params, "questions")) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      const question = stringField(item as Record<string, unknown>, "question");
+      const prompt = stringField(item as Record<string, unknown>, "prompt");
+      if (question) {
+        return question;
+      }
+      if (prompt) {
+        return prompt;
+      }
+    }
+  }
+  return "";
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringField(params: Record<string, unknown>, key: string): string {
+  const value = params[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function arrayField(params: Record<string, unknown>, key: string): unknown[] {
+  const value = params[key];
+  return Array.isArray(value) ? value : [];
 }

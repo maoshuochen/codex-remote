@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 export const runtimeStateSchema = z.enum(["starting", "ready", "busy", "error"]);
+export const approvalKindSchema = z.enum(["command", "file_change", "permission", "user_input", "unknown"]);
 
 export const pairingQrPayloadSchema = z.object({
   bridgeUrl: z.string().url(),
+  webUrl: z.string().url(),
   deviceName: z.string().min(1),
   pairingToken: z.string().min(1),
   expiresAt: z.string().datetime(),
@@ -109,6 +111,42 @@ export const threadOpenResponsePayloadSchema = z.object({
   threadId: z.string().min(1),
 });
 
+export const approvalRequestSchema = z.object({
+  approvalId: z.string().min(1),
+  method: z.string().min(1),
+  kind: approvalKindSchema,
+  threadId: z.string().default(""),
+  turnId: z.string().default(""),
+  itemId: z.string().default(""),
+  reason: z.string().default(""),
+  summary: z.string().min(1),
+  choices: z.array(z.string().min(1)),
+  createdAt: z.string().datetime(),
+  params: z.unknown().optional(),
+});
+
+export const approvalListResponsePayloadSchema = z.object({
+  approvals: z.array(approvalRequestSchema),
+});
+
+export const approvalResolvePayloadSchema = z.object({
+  approvalId: z.string().min(1),
+  result: z.unknown(),
+});
+
+export const approvalResolveResponsePayloadSchema = z.object({
+  resolved: z.literal(true),
+  approvalId: z.string().min(1),
+});
+
+export const approvalRequestedPayloadSchema = z.object({
+  approval: approvalRequestSchema,
+});
+
+export const approvalResolvedPayloadSchema = z.object({
+  approvalId: z.string().min(1),
+});
+
 export const threadStreamDeltaPayloadSchema = z.object({
   threadId: z.string().min(1),
   turnId: z.string().min(1),
@@ -160,6 +198,13 @@ export type ThreadSendPayload = z.infer<typeof threadSendPayloadSchema>;
 export type ThreadSendResponsePayload = z.infer<typeof threadSendResponsePayloadSchema>;
 export type ThreadOpenPayload = z.infer<typeof threadOpenPayloadSchema>;
 export type ThreadOpenResponsePayload = z.infer<typeof threadOpenResponsePayloadSchema>;
+export type ApprovalKind = z.infer<typeof approvalKindSchema>;
+export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
+export type ApprovalListResponsePayload = z.infer<typeof approvalListResponsePayloadSchema>;
+export type ApprovalResolvePayload = z.infer<typeof approvalResolvePayloadSchema>;
+export type ApprovalResolveResponsePayload = z.infer<typeof approvalResolveResponsePayloadSchema>;
+export type ApprovalRequestedPayload = z.infer<typeof approvalRequestedPayloadSchema>;
+export type ApprovalResolvedPayload = z.infer<typeof approvalResolvedPayloadSchema>;
 export type ThreadStreamDeltaPayload = z.infer<typeof threadStreamDeltaPayloadSchema>;
 export type ThreadStreamDonePayload = z.infer<typeof threadStreamDonePayloadSchema>;
 export type ThreadStreamErrorPayload = z.infer<typeof threadStreamErrorPayloadSchema>;

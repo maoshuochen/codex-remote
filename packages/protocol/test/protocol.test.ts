@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   pairingQrPayloadSchema,
+  approvalListResponsePayloadSchema,
+  approvalResolvePayloadSchema,
   runtimeStateSchema,
   threadSummarySchema,
   threadDetailSchema,
@@ -21,6 +23,7 @@ test("runtime state schema rejects unknown states", () => {
 test("pairing qr payload schema requires a valid url and token fields", () => {
   const payload = pairingQrPayloadSchema.parse({
     bridgeUrl: "ws://127.0.0.1:8787",
+    webUrl: "http://127.0.0.1:8787",
     deviceName: "Test Mac",
     pairingToken: "token",
     expiresAt: "2026-04-12T00:00:00Z",
@@ -70,4 +73,26 @@ test("thread detail schema validates nested messages", () => {
   });
 
   assert.equal(detail.messages[0]?.role, "assistant");
+});
+
+test("approval schemas validate pending requests and resolution payloads", () => {
+  const list = approvalListResponsePayloadSchema.parse({
+    approvals: [
+      {
+        approvalId: "approval-1",
+        method: "item/commandExecution/requestApproval",
+        kind: "command",
+        summary: "npm test",
+        choices: ["accept", "decline"],
+        createdAt: "2026-04-12T00:00:00Z",
+      },
+    ],
+  });
+  const resolve = approvalResolvePayloadSchema.parse({
+    approvalId: "approval-1",
+    result: { decision: "accept" },
+  });
+
+  assert.equal(list.approvals[0]?.threadId, "");
+  assert.equal(resolve.approvalId, "approval-1");
 });

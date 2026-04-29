@@ -5,6 +5,7 @@ import type {
   JsonRpcError,
   JsonRpcNotification,
   JsonRpcRequest,
+  JsonRpcServerRequest,
   JsonRpcSuccess,
 } from "../types/codex.js";
 
@@ -63,6 +64,20 @@ export class JsonRpcClient extends EventEmitter {
     );
   }
 
+  reply(id: string, result: unknown): void {
+    if (!this.socket) {
+      throw new Error("JSON-RPC socket is not connected.");
+    }
+
+    this.socket.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        result,
+      } satisfies JsonRpcSuccess),
+    );
+  }
+
   close(): void {
     this.socket?.removeAllListeners();
     this.socket?.close();
@@ -74,7 +89,7 @@ export class JsonRpcClient extends EventEmitter {
   }
 
   private handleMessage(raw: string): void {
-    const payload = JSON.parse(raw) as JsonRpcSuccess | JsonRpcError | JsonRpcNotification;
+    const payload = JSON.parse(raw) as JsonRpcSuccess | JsonRpcError | JsonRpcNotification | JsonRpcServerRequest;
     if ("id" in payload && "result" in payload) {
       const pending = this.pending.get(payload.id);
       if (pending) {
@@ -91,6 +106,11 @@ export class JsonRpcClient extends EventEmitter {
         this.pending.delete(key);
         pending.reject(new Error(payload.error.message));
       }
+      return;
+    }
+
+    if ("id" in payload && "method" in payload) {
+      this.emit("serverRequest", payload);
       return;
     }
 
