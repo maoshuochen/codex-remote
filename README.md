@@ -112,6 +112,25 @@ For web UI development without rebuilding the bridge-served bundle:
 npm run dev:web
 ```
 
+## GitHub Pages
+
+The web client can also be deployed as a static shell on GitHub Pages. The Pages workflow builds `apps/web` with the repository base path and uploads `apps/web/dist`.
+
+To enable it in GitHub:
+
+1. Open the repository settings.
+2. Go to **Pages**.
+3. Set **Source** to **GitHub Actions**.
+4. Run the `Pages` workflow or push to `main`.
+
+The expected Pages URL for this repository is:
+
+```text
+https://maoshuochen.github.io/codex-remote/
+```
+
+Important: GitHub Pages is served over HTTPS, so a Pages-hosted browser cannot connect to the default `ws://` bridge URL. To use the Pages-hosted shell with a Mac bridge, expose the bridge through `wss://` and include the Pages origin in `CODEX_REMOTE_ALLOWED_ORIGINS`.
+
 ## Bridge protocol
 
 The bridge protocol lives in [`packages/protocol/src/protocol.ts`](/Users/maoshuo/code/codex-remote/packages/protocol/src/protocol.ts).
