@@ -152,15 +152,17 @@ export class BridgeServer {
     const bridgeUrl = `ws://${advertisedHost}:${this.config.port}`;
     const webUrl = `http://${advertisedHost}:${this.config.port}`;
     const pairingPayload = this.pairingService.issuePairingQr(bridgeUrl, webUrl, createPairingToken());
+    const pairingUrl = buildPairingUrl(webUrl, pairingPayload);
     log("info", "bridge server listening", {
       host: this.config.host,
       port: this.config.port,
       webUrl,
+      pairingUrl,
       pairingPayload,
     });
 
     const qrcode = await import("qrcode-terminal");
-    qrcode.default.generate(JSON.stringify(pairingPayload), { small: true });
+    qrcode.default.generate(pairingUrl, { small: true });
   }
 
   stop(): void {
@@ -478,6 +480,11 @@ function contentTypeFor(filePath: string): string {
     return "image/svg+xml";
   }
   return "application/octet-stream";
+}
+
+function buildPairingUrl(webUrl: string, payload: unknown): string {
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return `${webUrl.replace(/\/+$/, "")}/#pair=${encodedPayload}`;
 }
 
 function resolveAdvertisedHost(host: string): string {

@@ -374,6 +374,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const pairingFromUrl = readPairingPayloadFromUrl();
+    if (pairingFromUrl) {
+      setPairingText(pairingFromUrl);
+      void client.pair(pairingFromUrl).then(clearPairingPayloadFromUrl).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "Could not pair this browser.";
+        setState((current) => ({ ...current, phase: "not_paired", error: message }));
+      });
+      return () => client.disconnect();
+    }
     void client.restore();
     return () => client.disconnect();
   }, [client]);
@@ -393,12 +402,12 @@ function App() {
               <code>npm run dev:bridge</code>
             </li>
             <li>
-              <strong>Copy the pairing payload printed in the terminal</strong>
-              <span>When using GitHub Pages, paste the full JSON object. When using the bridge-hosted URL, the token alone is enough.</span>
+              <strong>Scan the QR code with your phone camera</strong>
+              <span>The QR opens this web app with the pairing payload already attached, then connects automatically.</span>
             </li>
             <li>
-              <strong>Paste it below and pair</strong>
-              <span>The browser will save a local key for reconnecting to this Mac.</span>
+              <strong>Use paste only as a fallback</strong>
+              <span>If scanning fails, paste the full pairing JSON from the terminal below.</span>
             </li>
           </ol>
           <textarea
@@ -595,6 +604,24 @@ function loadPairing(): StoredPairing | null {
   }
 }
 
+function readPairingPayloadFromUrl(): string | null {
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  const params = new URLSearchParams(hash);
+  const encodedPayload = params.get("pair");
+  if (!encodedPayload) {
+    return null;
+  }
+  try {
+    return new TextDecoder().decode(base64UrlToBytes(encodedPayload));
+  } catch {
+    return null;
+  }
+}
+
+function clearPairingPayloadFromUrl(): void {
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+}
+
 function savePairing(pairing: StoredPairing): void {
   localStorage.setItem(pairingStorageKey, JSON.stringify(pairing));
 }
@@ -636,6 +663,11 @@ function base64ToBytes(value: string): Uint8Array {
     bytes[index] = binary.charCodeAt(index);
   }
   return bytes;
+}
+
+function base64UrlToBytes(value: string): Uint8Array {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return base64ToBytes(padded);
 }
 
 function hexToBytes(value: string): Uint8Array {

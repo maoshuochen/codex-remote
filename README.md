@@ -31,8 +31,8 @@ This is a browser/PWA companion for Codex on macOS, not a general remote desktop
 ### Typical flow
 
 1. Start the bridge on the Mac and wait for it to be ready.
-2. Open the printed web URL from a trusted browser.
-3. Paste the one-time pairing token or the full pairing payload.
+2. Scan the printed QR code with a trusted phone.
+3. Let the opened web page pair itself with the bridge.
 4. View threads, create chats, send follow-ups, and resolve approvals.
 5. Hand off to `Codex.app` when the desktop experience is needed.
 
@@ -103,7 +103,8 @@ The bridge will:
 
 - start `codex app-server` on a loopback WebSocket
 - serve the web client from `apps/web/dist`
-- print a pairing payload in the terminal
+- print a QR code that opens and pairs the web client on your phone
+- log the raw pairing payload for fallback copy/paste
 - accept paired browser reconnects
 
 For web UI development without rebuilding the bridge-served bundle:
