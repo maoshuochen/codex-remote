@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "prebuild": "npm run build --workspace @codex-remote/protocol",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview --host 0.0.0.0",
+    "pretest": "npm run build --workspace @codex-remote/protocol",
     "test": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
