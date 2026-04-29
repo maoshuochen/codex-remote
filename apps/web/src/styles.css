@@ -84,7 +84,62 @@ textarea {
 }
 
 .pairing-panel textarea {
-  min-height: 180px;
+  min-height: 150px;
+}
+
+.pairing-steps {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: pairing-step;
+}
+
+.pairing-steps li {
+  counter-increment: pairing-step;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 2px 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #e6eae3;
+  border-radius: 8px;
+  background: #f9fbf8;
+}
+
+.pairing-steps li::before {
+  content: counter(pairing-step);
+  grid-row: span 3;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #176b55;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.pairing-steps strong {
+  font-size: 14px;
+}
+
+.pairing-steps span {
+  color: #697168;
+  line-height: 1.45;
+}
+
+.pairing-steps code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  margin-top: 5px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: #edf1ea;
+  color: #263126;
 }
 
 .eyebrow {

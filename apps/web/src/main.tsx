@@ -385,12 +385,26 @@ function App() {
           <div>
             <p className="eyebrow">Codex Remote</p>
             <h1>Pair this browser with your Mac</h1>
-            <p className="muted">Paste the pairing JSON from the bridge terminal, or paste only the one-time token when this page is served by the bridge.</p>
+            <p className="muted">Codex still runs on your Mac. This page is only the control surface; pair it with the Mac bridge before opening threads or sending messages.</p>
           </div>
+          <ol className="pairing-steps">
+            <li>
+              <strong>Start the bridge on your Mac</strong>
+              <code>npm run dev:bridge</code>
+            </li>
+            <li>
+              <strong>Copy the pairing payload printed in the terminal</strong>
+              <span>When using GitHub Pages, paste the full JSON object. When using the bridge-hosted URL, the token alone is enough.</span>
+            </li>
+            <li>
+              <strong>Paste it below and pair</strong>
+              <span>The browser will save a local key for reconnecting to this Mac.</span>
+            </li>
+          </ol>
           <textarea
             value={pairingText}
             onChange={(event) => setPairingText(event.target.value)}
-            placeholder='{"bridgeUrl":"ws://...","pairingToken":"..."}'
+            placeholder='Paste the full pairing JSON here, for example {"bridgeUrl":"ws://192.168.1.20:8787","webUrl":"http://192.168.1.20:8787","pairingToken":"..."}'
           />
           {state.error ? <p className="error">{state.error}</p> : null}
           <button className="primary" onClick={() => void client.pair(pairingText)}>Pair browser</button>
